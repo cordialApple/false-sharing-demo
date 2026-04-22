@@ -1,0 +1,9 @@
+version , threads, runtime_seconds
+unpadded,       1,        0.000121
+padded  ,       1,        0.000189
+unpadded,       2,        0.000131
+padded  ,       2,        0.000051
+unpadded,       4,        0.000175
+padded  ,       4,        0.000120
+unpadded,       8,        0.000300
+padded  ,       8,        0.000211

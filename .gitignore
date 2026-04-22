@@ -11,6 +11,8 @@ __pycache__/
 *.out
 *.exe
 false-sharing-lab/c_benchmark/benchmark
+results/benchmark_results.csv
+reports/analysis.md
 
 .DS_Store
 Thumbs.db
