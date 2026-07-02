@@ -36,8 +36,11 @@ def _run_wsl(cmd, cwd=None):
         # WINDOWS. GROK IN WINDOWS PRISON. USE WSL TO ESCAPE.
         # CONVERT WINDOWS PATH TO WSL PATH FOR CWD.
         if cwd:
-            wsl_cwd = str(cwd).replace('\\', '/').replace('C:', '/mnt/c').replace('c:', '/mnt/c')
-            full_cmd = f"cd '{wsl_cwd}' && {cmd}"
+            # ANY DRIVE LETTER, NOT JUST C:. REVIEW FOUND D: REPO BREAK HERE.
+            p = str(cwd).replace('\\', '/')
+            if len(p) >= 2 and p[1] == ':':
+                p = '/mnt/' + p[0].lower() + p[2:]
+            full_cmd = f"cd '{p}' && {cmd}"
         else:
             full_cmd = cmd
         result = subprocess.run(

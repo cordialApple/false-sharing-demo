@@ -48,11 +48,11 @@
         {
           "heuristic": "H3",
           "struct_contains": "atomic_pair",
-          "severity": "MEDIUM"
+          "severity": "HIGH"
         }
       ],
       "known_limitation": true,
-      "notes": "Adjacent _Atomic long fields in same struct, different threads. H3 is a known Tier-1 gap: (1) atomicrmw not matched by store_re, (2) H3 heuristic not implemented. Verdict will be MISS."
+      "notes": "Adjacent _Atomic long fields in same struct, different threads. Tier-2 fires H3/HIGH (severity matches label now; was mislabeled MEDIUM). H3 is a known Tier-1 gap: atomicrmw not matched, H3 not implemented there."
     },
     {
       "file": "basic/tp_h5_adjacent_globals.c",
@@ -70,7 +70,7 @@
       "file": "basic/tn_single_thread.c",
       "expected": [],
       "known_limitation": false,
-      "notes": "Variable-index array access but NO pthread_create. H2 correctly skips (no thread-reachable fns). H4 may fire -- that is a documented genuine tier-1 weakness (H4 has no thread-context guard)."
+      "notes": "Variable-index array access but NO pthread_create. H2 correctly skips (no thread-reachable fns). H4 also stays quiet: both tiers guard H4 on thread reachability (guard added after this case exposed FPs in round 1)."
     },
     {
       "file": "basic/tn_readonly_sharing.c",

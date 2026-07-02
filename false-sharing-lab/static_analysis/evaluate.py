@@ -4,10 +4,9 @@
 # WHOLE POINT: MEASURE COVERAGE GAPS. NOT HIDE THEM.
 #
 # USAGE: python evaluate.py
-# OUTPUT: markdown score table to STDOUT + results/heuristic_scores.md
-# EXIT 0 = NO UNEXPECTED FP OR FN. EXIT 1 = FAILURES EXIST (GAPS FROM
-#          known_limitation=true CASES ARE ALLOWED AND DO NOT CAUSE EXIT 1).
-#          known_fp=["H2",...] CASES SHOW AS KNOWN-FP, NOT FP, NOT EXIT 1.
+# OUTPUT: markdown score table to STDOUT + results/heuristic_scores_<analyzer>.md
+# EXIT 0 = NO UNEXPECTED FP, FN, OR ANALYZER ERROR. EXIT 1 OTHERWISE.
+#          GAPS (known_limitation=true) AND KNOWN-FP (known_fp=[...]) ARE ALLOWED.
 
 import json
 import subprocess
@@ -341,7 +340,9 @@ def main():
         for case in cases:
             rel      = Path(case['file'])
             ll_file  = get_ll_path(case)
-            case_name = rel.stem       # USE STEM AS CASE NAME. UNIQUE PER FILE.
+            # FULL RELATIVE PATH MINUS .c AS CASE NAME. STEM ALONE COLLIDE IF
+            # basic/ AND advanced/ EVER SHARE A FILENAME. REVIEW CAUGHT THIS.
+            case_name = str(rel.with_suffix('')).replace('\\', '/')
 
             # RUN ANALYZER.
             findings, err = run_analyzer(cmd_template, ll_file)
@@ -367,6 +368,10 @@ def main():
         total_fn   = sum(m['FN']       for m in metrics.values())
         total_gap  = sum(m['GAP']      for m in metrics.values())
         total_kfp  = sum(m['KNOWN_FP'] for m in metrics.values())
+        # COUNT ERROR VERDICTS TOO. REVIEW FOUND: ANALYZER CRASH ON EVERY CASE
+        # SCORED AS GREEN BECAUSE ERROR FELL THROUGH ALL METRIC BUCKETS. NEVER AGAIN.
+        total_err  = sum(1 for vs in all_case_results.values()
+                         for v in vs if v['type'] == 'ERROR')
 
         # MARKDOWN REPORT CONTENT.
         report_lines = [
@@ -386,6 +391,7 @@ def main():
             f'- **Unexpected FN / MISS** (TP cases not caught): {total_fn}',
             f'- **Known Gaps** (known_limitation=true, not penalized): {total_gap}',
             f'- **Known FP** (known_fp=[...], not penalized): {total_kfp}',
+            f'- **Analyzer errors** (case not analyzed at all): {total_err}',
             '',
         ]
         # NO HARD-CODED WEAKNESS PROSE HERE. PER-CASE DETAIL TELL THE STORY.
@@ -397,7 +403,7 @@ def main():
         print()
         print(score_table)
         print()
-        print(f'FP={total_fp} FN={total_fn} GAP={total_gap} KNOWN-FP={total_kfp}')
+        print(f'FP={total_fp} FN={total_fn} GAP={total_gap} KNOWN-FP={total_kfp} ERR={total_err}')
 
         # WRITE RESULTS FILE. ONE FILE PER ANALYZER. NO OVERWRITE WAR.
         results_file = RESULTS_DIR / f'heuristic_scores_{analyzer_name}.md'
@@ -405,8 +411,8 @@ def main():
             f.write(report_md)
         print(f'\nResults written to: {results_file}')
 
-        # EXIT CODE: 1 IF UNEXPECTED FP OR FN. KNOWN-FP AND GAPS ARE FORGIVEN.
-        if total_fp > 0 or total_fn > 0:
+        # EXIT CODE: 1 IF UNEXPECTED FP, FN, OR ANALYZER ERROR. GAPS/KNOWN-FP FORGIVEN.
+        if total_fp > 0 or total_fn > 0 or total_err > 0:
             exit_code = 1
 
     # GROK DONE. HONEST RESULT. NO FUDGE.

@@ -53,7 +53,7 @@ def type_size_and_align(typename, struct_layouts):
         return count * elem_size, elem_align
 
     # STRUCT TYPE. LOOK UP IN TABLE GROK ALREADY BUILT.
-    struct_m = re.match(r'^(%struct\.\w+)$', typename)
+    struct_m = re.match(r'^(%struct\.[\w.]+)$', typename)
     if struct_m:
         key = struct_m.group(1)
         if key in struct_layouts:
@@ -101,7 +101,7 @@ def parse_struct_layouts(lines):
     """
     # GROK COLLECT RAW STRUCT BODIES FIRST. ONE PASS THROUGH FILE.
     # STRUCT DECL ON ONE LINE IN -O0 IR. GROK LUCKY.
-    struct_decl_re = re.compile(r'^(%struct\.\w+)\s*=\s*type\s*\{([^}]*)\}')
+    struct_decl_re = re.compile(r'^(%struct\.[\w.]+)\s*=\s*type\s*\{([^}]*)\}')
     raw_structs = {}
     for line in lines:
         m = struct_decl_re.match(line.strip())
@@ -126,7 +126,7 @@ def parse_struct_layouts(lines):
 
         for i, ftype in enumerate(field_types):
             # NESTED STRUCT? COMPUTE ITS LAYOUT FIRST.
-            nested_m = re.match(r'(%struct\.\w+)', ftype)
+            nested_m = re.match(r'(%struct\.[\w.]+)', ftype)
             if nested_m:
                 nested_name = nested_m.group(1)
                 if nested_name in raw_structs and nested_name not in struct_layouts:
@@ -215,7 +215,8 @@ def parse_functions(lines):
         for line in fn_lines:
             m = pthread_re.search(line)
             if m:
-                args = _split_call_args(m.group(1))
+                # SAME BRACKET-DEPTH SPLIT AS TYPE LISTS. ONE HELPER. NO TWIN CODE.
+                args = split_type_list(m.group(1))
                 if len(args) >= 3:
                     # THIRD ARG (INDEX 2). EXTRACT @function_name.
                     third = args[2].strip()
@@ -227,29 +228,6 @@ def parse_functions(lines):
                             thread_entries.append((fn_name, entry))
 
     return functions, thread_entries
-
-
-def _split_call_args(args_str):
-    """Split call instruction argument list by commas, respecting nesting."""
-    # SAME TRICK AS TYPE LIST SPLIT. BRACKET DEPTH GUARD.
-    args = []
-    depth = 0
-    current = []
-    for ch in args_str:
-        if ch in '([{':
-            depth += 1
-            current.append(ch)
-        elif ch in ')]}':
-            depth -= 1
-            current.append(ch)
-        elif ch == ',' and depth == 0:
-            args.append(''.join(current))
-            current = []
-        else:
-            current.append(ch)
-    if current:
-        args.append(''.join(current))
-    return args
 
 
 def build_call_closure(start_fns, all_functions):
@@ -301,7 +279,7 @@ def find_gep_accesses(fn_lines):
 
     # H2: VARIABLE INDEX GEP. i64 %reg (NOT CONSTANT NUMBER).
     var_idx_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.\w+),\s*ptr\s+%\w+,\s*i64\s+%(\w+)'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%\w+,\s*i64\s+%(\w+)'
     )
 
     # H2 SHAPE 2: GLOBAL/STACK FIXED ARRAY OF STRUCTS. GEP SOURCE TYPE IS ARRAY.
@@ -310,18 +288,20 @@ def find_gep_accesses(fn_lines):
     # PATTERN IN LLVM TrackingStatistic. ELEMENT MUST BE STRUCT — SCALAR ARRAY
     # ([8 x i64]) IS H6 TERRITORY, NOT H2. BASE CAN BE @GLOBAL OR %REG.
     array_var_idx_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+(%struct\.\w+)\],'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+(%struct\.[\w.]+)\],'
         r'\s*ptr\s+[@%][\w.]+,\s*i64\s+0,\s*i64\s+%(\w+)'
     )
 
     # H1: FIELD ACCESS GEP. i32 0, i32 FIELD_IDX (CONSTANT FIELD INDEX).
     field_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.\w+),\s*ptr\s+%\w+,\s*i32\s+0,\s*i32\s+(\d+)'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%\w+,\s*i32\s+0,\s*i32\s+(\d+)'
     )
 
     # STORE INSTRUCTION. GROK FIND WRITE TO MEMORY.
     # store TYPE VALUE, ptr %TARGET
-    store_re = re.compile(r'\bstore\b\s+\S+\s+\S+,\s*ptr\s+%(\w+)')
+    # OPTIONAL volatile TOKEN. CLANG EMIT 'store volatile i64 ...' FOR VOLATILE FIELD.
+    # REVIEW FOUND GROK MISS THOSE. VOLATILE FIELD IS EXACTLY THE HOT KIND. MUST SEE.
+    store_re = re.compile(r'\bstore\b\s+(?:volatile\s+)?\S+\s+\S+,\s*ptr\s+%(\w+)')
 
     variable_index_geps = []   # struct names from H2-pattern GEPs
     field_gep_map = {}         # result_reg -> (struct_name, field_idx)
@@ -458,64 +438,63 @@ def analyze(ll_path):
             unique_fields = sorted(set(fi for fi, _ in bucket_list))
             if len(unique_fields) >= 2:
                 fn_names = sorted(set(fn for _, fn in bucket_list))
-                # ONLY EMIT H1 IF H2 NOT ALREADY FIRED FOR THIS STRUCT.
-                # H2 IS STRONGER SIGNAL. NO NEED DOUBLE WARN.
-                if struct_name not in h2_flagged_structs:
-                    findings.append({
-                        'heuristic': 'H1',
-                        'severity': 'MEDIUM',
-                        'struct': struct_name,
-                        'struct_size_bytes': layout['size'],
-                        'elements_per_cache_line': None,
-                        'thread_fn': ', '.join(fn_names),
-                        'detail': (
-                            f"Fields {unique_fields} of {struct_name} occupy "
-                            f"cache-line bucket {bucket} (offset {bucket * CACHE_LINE_BYTES}"
-                            f"-{(bucket + 1) * CACHE_LINE_BYTES - 1}B) and are "
-                            f"both written from thread-reachable code."
-                        ),
-                        'fix': (
-                            f"Split hot fields of {struct_name} into a separate struct, "
-                            f"or insert padding to push fields to different cache lines."
-                        ),
-                    })
+                findings.append({
+                    'heuristic': 'H1',
+                    'severity': 'MEDIUM',
+                    'struct': struct_name,
+                    'struct_size_bytes': layout['size'],
+                    'elements_per_cache_line': None,
+                    'thread_fn': ', '.join(fn_names),
+                    'detail': (
+                        f"Fields {unique_fields} of {struct_name} occupy "
+                        f"cache-line bucket {bucket} (offset {bucket * CACHE_LINE_BYTES}"
+                        f"-{(bucket + 1) * CACHE_LINE_BYTES - 1}B) and are "
+                        f"both written from thread-reachable code."
+                    ),
+                    'fix': (
+                        f"Split hot fields of {struct_name} into a separate struct, "
+                        f"or insert padding to push fields to different cache lines."
+                    ),
+                })
 
-    # STEP 4C: H4 SCAN THREAD-REACHABLE FUNCTIONS FOR ARRAY-OF-STRUCT.
-    # H4 IS LAYOUT ADVISORY. STRUCT SIZE NOT MULTIPLE OF 64 MEANS ELEMENTS STRADDLE LINES.
-    # CORPUS TAUGHT GROK: SINGLE THREAD CANNOT FALSE-SHARE. NO THREAD, NO H4.
-    # (tn_single_thread AND edge_fnptr_entry MADE FALSE POSITIVES BEFORE THIS GUARD.)
-    for fn_name, fn_lines in all_functions.items():
-        if fn_name not in thread_reachable:
-            continue
-        var_idx_geps, _ = find_gep_accesses(fn_lines)
-        for struct_name in var_idx_geps:
-            h4_array_structs.add(struct_name)
-
-    # EMIT H4 ADVISORY FOR NON-ALIGNED STRUCT SIZES. BUT NOT IF H2 ALREADY FIRED.
-    # H2 ALREADY TELLS HUMAN TO PAD. H4 WOULD REPEAT SAME ADVICE. GROK AVOID NOISE.
+    # STEP 4C: EMIT H4 ADVISORY FOR NON-ALIGNED STRUCT SIZES.
+    # h4_array_structs ALREADY FILLED BY STEP 4A (THREAD-REACHABLE SCAN ONLY).
+    # SINGLE THREAD CANNOT FALSE-SHARE. NO THREAD, NO H4. GUARD LIVE IN 4A.
     for struct_name in sorted(h4_array_structs):
         if struct_name not in struct_layouts:
             continue
         layout = struct_layouts[struct_name]
         sz = layout['size']
         if sz % CACHE_LINE_BYTES != 0:
-            if struct_name not in h2_flagged_structs:
-                findings.append({
-                    'heuristic': 'H4',
-                    'severity': 'LOW',
-                    'struct': struct_name,
-                    'struct_size_bytes': sz,
-                    'elements_per_cache_line': None,
-                    'thread_fn': None,
-                    'detail': (
-                        f"{struct_name} (size={sz}B) is used as array element "
-                        f"but {sz} % {CACHE_LINE_BYTES} = {sz % CACHE_LINE_BYTES}. "
-                        f"Array elements straddle cache-line boundaries."
-                    ),
-                    'fix': (
-                        f"Pad {struct_name} to a multiple of {CACHE_LINE_BYTES} bytes."
-                    ),
-                })
+            findings.append({
+                'heuristic': 'H4',
+                'severity': 'LOW',
+                'struct': struct_name,
+                'struct_size_bytes': sz,
+                'elements_per_cache_line': None,
+                'thread_fn': None,
+                'detail': (
+                    f"{struct_name} (size={sz}B) is used as array element "
+                    f"but {sz} % {CACHE_LINE_BYTES} = {sz % CACHE_LINE_BYTES}. "
+                    f"Array elements straddle cache-line boundaries."
+                ),
+                'fix': (
+                    f"Pad {struct_name} to a multiple of {CACHE_LINE_BYTES} bytes."
+                ),
+            })
+
+    # STEP 5: SUPPRESSION POST-FILTER. POLICY LIVE IN ONE PLACE, NOT SCATTERED GUARDS.
+    # STRONGER FINDING FOR SAME STRUCT WIN. WEAKER ONE IS SAME ADVICE, JUST NOISE.
+    # H2 BEAT H1 AND H4. H1 BEAT H4. REVIEW FOUND H1+H4 DOUBLE-FIRE ON >64B STRUCT.
+    SUPPRESSES = {'H2': {'H1', 'H4'}, 'H1': {'H4'}}
+    fired_by = {}  # struct -> set of heuristics that fired
+    for f in findings:
+        fired_by.setdefault(f['struct'], set()).add(f['heuristic'])
+    findings = [
+        f for f in findings
+        if not any(f['heuristic'] in SUPPRESSES.get(dom, set())
+                   for dom in fired_by[f['struct']] if dom != f['heuristic'])
+    ]
 
     return findings, struct_layouts, thread_reachable, entry_fn_names
 

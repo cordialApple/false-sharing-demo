@@ -278,9 +278,11 @@ static std::vector<Function *> sortedThreadFns(FSContext &Ctx) {
 // HEURISTIC H2 (HIGH) -- ARRAY OF SMALL STRUCT INDEXED BY VARIABLE.
 // GEP WITH NON-CONSTANT ARRAY INDEX, SOURCE STRUCT SIZE < 64, IN THREAD LAND.
 // CLASSIC FALSE SHARING: counters[tid].value++. ADJACENT ELEMENT SHARE LINE.
-// RETURN SET OF STRUCT ALREADY FLAGGED SO H1/H4 NO DOUBLE WARN.
+// CROSS-HEURISTIC SUPPRESSION NOT HERE. THAT LIVE IN applySuppression.
 // ========================================================================
-static void runH2(FSContext &Ctx, std::set<std::string> &h2Structs) {
+static void runH2(FSContext &Ctx) {
+  // LOCAL DEDUPE ONLY. MANY GEP ON SAME STRUCT = ONE H2 WARN.
+  std::set<std::string> flagged;
   for (Function *F : sortedThreadFns(Ctx)) {
     if (F->isDeclaration())
       continue;
@@ -296,9 +298,9 @@ static void runH2(FSContext &Ctx, std::set<std::string> &h2Structs) {
         uint64_t sz = Ctx.DL.getStructLayout(gi.structTy)->getSizeInBytes();
         if (sz >= CACHE_LINE_BYTES)
           continue;
-        if (h2Structs.count(key))
+        if (flagged.count(key))
           continue; // ALREADY WARNED THIS STRUCT. ONE WARN ENOUGH.
-        h2Structs.insert(key);
+        flagged.insert(key);
 
         int64_t epl = sz > 0 ? (int64_t)(CACHE_LINE_BYTES / sz) : 1;
         std::string fn = F->getName().str();
@@ -329,9 +331,10 @@ static void runH2(FSContext &Ctx, std::set<std::string> &h2Structs) {
 
 // ========================================================================
 // HEURISTIC H1 (MEDIUM) -- TWO FIELD SAME 64B BUCKET, BOTH STORED IN THREAD.
-// GROK USE EXACT StructLayout OFFSET. NOT GUESS. SUPPRESS IF H2 ALREADY FIRED.
+// GROK USE EXACT StructLayout OFFSET. NOT GUESS.
+// H2-BEATS-H1 SUPPRESSION LIVE IN applySuppression. NOT HERE.
 // ========================================================================
-static void runH1(FSContext &Ctx, const std::set<std::string> &h2Structs) {
+static void runH1(FSContext &Ctx) {
   // struct -> fieldIdx -> set of thread fn name (NON-ATOMIC STORE ONLY).
   std::map<std::string, std::map<unsigned, std::set<std::string>>> acc;
   std::map<std::string, StructType *> keyToTy;
@@ -356,8 +359,6 @@ static void runH1(FSContext &Ctx, const std::set<std::string> &h2Structs) {
 
   for (auto &kv : acc) {
     const std::string &key = kv.first;
-    if (h2Structs.count(key))
-      continue; // H2 STRONGER. NO DOUBLE WARN.
     StructType *st = keyToTy[key];
     const StructLayout *SL = Ctx.DL.getStructLayout(st);
     uint64_t structSz = SL->getSizeInBytes();
@@ -507,11 +508,12 @@ static void runH3(FSContext &Ctx) {
 // ========================================================================
 // HEURISTIC H4 (LOW) -- STRUCT USED AS VARIABLE-INDEX ARRAY ELEMENT IN
 // THREAD-REACHABLE CODE, SIZE % 64 != 0, NO >=64 ALIGNMENT. ELEMENTS
-// STRADDLE CACHE LINE. SUPPRESS IF H2 FIRED.
+// STRADDLE CACHE LINE.
 // THREAD GUARD SAME AS H2: SINGLE-THREAD CODE CANNOT FALSE-SHARE.
 // NO PTHREAD_CREATE = NO THREAD LAND = H4 SILENT. NO FP ON SEQUENTIAL CODE.
+// H2/H1-BEAT-H4 SUPPRESSION LIVE IN applySuppression. NOT HERE.
 // ========================================================================
-static void runH4(FSContext &Ctx, const std::set<std::string> &h2Structs) {
+static void runH4(FSContext &Ctx) {
   std::map<std::string, StructType *> arrayStructs;
   for (Function *F : sortedThreadFns(Ctx)) {
     if (F->isDeclaration())
@@ -530,8 +532,6 @@ static void runH4(FSContext &Ctx, const std::set<std::string> &h2Structs) {
 
   for (auto &kv : arrayStructs) {
     const std::string &key = kv.first;
-    if (h2Structs.count(key))
-      continue; // H2 ALREADY SAY PAD IT. NO REPEAT.
     StructType *st = kv.second;
     uint64_t sz = Ctx.DL.getStructLayout(st)->getSizeInBytes();
     if (sz % CACHE_LINE_BYTES == 0)
@@ -648,6 +648,40 @@ static void runH5(FSContext &Ctx) {
   }
 }
 
+// ========================================================================
+// SUPPRESSION POST-FILTER. ONE PLACE FOR ALL "X BEATS Y" POLICY.
+// TABLE: H2 SUPPRESS {H1, H4}. H1 SUPPRESS {H4}. H3/H5 NEVER TOUCHED.
+// RULE: DROP FINDING IF DOMINATING HEURISTIC ALREADY WARN SAME STRUCT.
+// WHY ONE PLACE: SCATTERED INLINE GUARD MISS PAIR (H1 vs H4 WAS MISSED).
+// NEW HEURISTIC? ADD ROW TO TABLE. NO HUNT THROUGH runHX BODIES.
+// ========================================================================
+static void applySuppression(FSContext &Ctx) {
+  // TABLE OF DOMINANCE. victim -> LIST OF HEURISTIC THAT SILENCE IT.
+  static const std::map<std::string, std::vector<std::string>> suppressedBy = {
+      {"H1", {"H2"}},
+      {"H4", {"H2", "H1"}},
+  };
+
+  // COLLECT WHICH (heuristic, struct) PAIR FIRED. LOOKUP BOWL.
+  std::set<std::pair<std::string, std::string>> fired;
+  for (const Finding &f : Ctx.findings)
+    fired.insert({f.heuristic, f.structName});
+
+  // DROP VICTIM IF ANY DOMINATOR FIRED FOR SAME STRUCT NAME.
+  Ctx.findings.erase(
+      std::remove_if(Ctx.findings.begin(), Ctx.findings.end(),
+                     [&](const Finding &f) {
+                       auto it = suppressedBy.find(f.heuristic);
+                       if (it == suppressedBy.end())
+                         return false; // NOT A VICTIM. KEEP.
+                       for (const std::string &dom : it->second)
+                         if (fired.count({dom, f.structName}))
+                           return true; // DOMINATOR SPOKE. VICTIM QUIET.
+                       return false;
+                     }),
+      Ctx.findings.end());
+}
+
 // ------------------------------------------------------------------------
 // EMIT JSON. SAME SHAPE AS TIER 1 --json. AGENT AND evaluate.py EAT UNIFORM.
 // ------------------------------------------------------------------------
@@ -745,12 +779,14 @@ struct FalseSharingPass : PassInfoMixin<FalseSharingPass> {
     FSContext Ctx(M);
     discoverThreadReachable(Ctx);
 
-    std::set<std::string> h2Structs;
-    runH2(Ctx, h2Structs);   // HIGH -- ARRAY OF SMALL STRUCT.
-    runH3(Ctx);              // HIGH -- ATOMIC FIELD SAME LINE.
-    runH1(Ctx, h2Structs);   // MEDIUM -- TWO FIELD SAME LINE.
-    runH5(Ctx);              // MEDIUM -- TWO SMALL GLOBAL.
-    runH4(Ctx, h2Structs);   // LOW  -- STRADDLE ARRAY ELEMENT.
+    runH2(Ctx);   // HIGH -- ARRAY OF SMALL STRUCT.
+    runH3(Ctx);   // HIGH -- ATOMIC FIELD SAME LINE.
+    runH1(Ctx);   // MEDIUM -- TWO FIELD SAME LINE.
+    runH5(Ctx);   // MEDIUM -- TWO SMALL GLOBAL.
+    runH4(Ctx);   // LOW  -- STRADDLE ARRAY ELEMENT.
+
+    // ONE SUPPRESSION PASS AFTER ALL HEURISTIC SPEAK. POLICY IN ONE PLACE.
+    applySuppression(Ctx);
 
     emitJson(Ctx);
     return PreservedAnalyses::all(); // GROK LOOK ONLY. GROK TOUCH NOTHING.

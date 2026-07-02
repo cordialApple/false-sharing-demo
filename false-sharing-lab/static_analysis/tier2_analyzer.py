@@ -8,7 +8,6 @@
 #     --json   -> PRINT RAW PASS JSON
 #     (no flag)-> RENDER HUMAN REPORT
 
-import re
 import sys
 import os
 import json
@@ -124,18 +123,24 @@ def run_pass(ll_path: Path) -> dict:
         print(proc.stderr, file=sys.stderr)
         sys.exit(proc.returncode or 1)
 
-    # GROK PARSE STDOUT AS JSON. IF opt PRINT EXTRA NOISE, GRAB FIRST { ... } BLOCK.
+    # GROK PARSE STDOUT AS JSON. IF opt PRINT EXTRA NOISE, DECODE FROM FIRST '{'.
+    # raw_decode STOP AT BALANCED END OF OBJECT. GREEDY REGEX GRABBED TRAILING
+    # NOISE BRACES AND SECOND PARSE CRASHED UNCAUGHT. REVIEW CAUGHT IT.
     out = proc.stdout.strip()
     try:
         return json.loads(out)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", out, re.DOTALL)
-        if not m:
-            print("ERROR: pass produced no JSON. Raw output:", file=sys.stderr)
-            print(out, file=sys.stderr)
-            print(proc.stderr, file=sys.stderr)
-            sys.exit(1)
-        return json.loads(m.group(0))
+        start = out.find('{')
+        if start != -1:
+            try:
+                obj, _ = json.JSONDecoder().raw_decode(out[start:])
+                return obj
+            except json.JSONDecodeError:
+                pass
+        print("ERROR: pass produced no parseable JSON. Raw output:", file=sys.stderr)
+        print(out, file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        sys.exit(1)
 
 
 def format_human(data: dict, ll_path: Path) -> str:
