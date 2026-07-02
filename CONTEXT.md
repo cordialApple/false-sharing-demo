@@ -1,6 +1,6 @@
 # CONTEXT.md
 
-_Last updated: 2026-07-02 ~01:10 · branch: static-analysis-lab · session: built static-analysis heuristic platform (tier1+tier2), PR #1 open, /code-review mid-flight_
+_Last updated: 2026-07-02 ~15:20 · branch: static-analysis-lab · session: /code-review completed, 8 confirmed bugs fixed in ef8fb59, CI green, PR #1 ready for merge_
 
 ## 1. What changed this session
 - Built `false-sharing-lab/static_analysis/`: full static false-sharing detection lab. Docs: `SOA.md` (state-of-the-art survey), `STRATEGY.md` (tier1 design), `TIER2_DESIGN.md` (tier2 design), `WORKPLAN.md` (phase tracker with all rounds + scores).
@@ -38,4 +38,4 @@ _Last updated: 2026-07-02 ~01:10 · branch: static-analysis-lab · session: buil
 - PR #1 — open, CI green, awaiting review/merge; review findings should be addressed on this branch.
 
 ## 5. Next step
-Finish the in-flight /code-review: collect the 5 remaining finder results (or relaunch: angles A line-scan, B removed-behavior, C cross-file, simplification, conventions on `git diff main...HEAD`), dedup all candidates, run 1-vote verify agents, output ≤8 findings ranked by severity — then decide with the user which to fix on the PR branch.
+Merge PR #1 (CI green on ef8fb59, review done, all 8 confirmed findings fixed) — then next heuristic round from the labeled gaps: H6 scalar-array candidate and nested-field attribution, growing the corpus first. NOTE (memory saved): always /code-review before opening future PRs; caveman style mandatory for commits + PR bodies per user CLAUDE.md.
