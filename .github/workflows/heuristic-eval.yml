@@ -1,0 +1,106 @@
+# GROK CI GATE. RUN HEURISTIC EVALUATOR ON EVERY PUSH AND PR.
+# GATE: evaluate.py EXIT 0 = GREEN. EXIT 1 = UNEXPECTED FP/FN = RED. HONEST.
+# EXIT 2 = COMPILE FAILURE = RED. KNOWN GAPS AND KNOWN-FP = ALLOWED. NOT RED.
+
+name: heuristic-eval
+
+on:
+  push:
+    branches: [main]
+    # ONLY RUN WHEN LAB FILES OR THIS WORKFLOW CHANGE. SKIP UNRELATED COMMITS.
+    paths:
+      - 'false-sharing-lab/**'
+      - '.github/workflows/heuristic-eval.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'false-sharing-lab/**'
+      - '.github/workflows/heuristic-eval.yml'
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # JOB 1: HEURISTIC EVAL. COMPILE CORPUS. RUN TIER-1 + TIER-2.
+  # ubuntu-latest = 24.04. apt CARRIES LLVM 18 NATIVE. NO VERSION PINNING PAIN.
+  # ──────────────────────────────────────────────────────────────────────
+  heuristic-eval:
+    name: Evaluate heuristics (tier-1 + tier-2)
+    runs-on: ubuntu-latest
+
+    steps:
+      # STEP 1: GET THE CODE.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # STEP 2: INSTALL DEPS. clang-18 EXPLICIT. AVOID DEFAULTING TO CLANG-14/15.
+      # llvm-18-dev = HEADERS + libLLVM-18 + CMAKE CONFIG. tier2 BUILD NEED IT.
+      # cmake + g++ = tier2_pass cmake build. python3 = run evaluate.py.
+      - name: Install LLVM 18, cmake, g++, python3
+        run: |
+          sudo apt-get update -qq
+          # INSTALL CLANG 18 EXPLICITLY. DO NOT USE PLAIN 'clang' (MAY BE 14 ON SOME IMAGES).
+          sudo apt-get install -y clang-18 llvm-18-dev cmake g++ python3
+          # SYMLINK clang -> clang-18 SO evaluate.py CAN CALL 'clang' WITHOUT VERSION SUFFIX.
+          sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
+
+      # STEP 3: BUILD TIER-2 LLVM PASS. build.sh PROBE llvm-config-18 AUTOMATICALLY.
+      - name: Build tier-2 LLVM pass (FalseSharingPass.so)
+        working-directory: false-sharing-lab/static_analysis/tier2_pass
+        run: bash build.sh
+
+      # STEP 4: RUN FULL HEURISTIC EVALUATION. EXIT CODE IS THE REGRESSION GATE.
+      # EXIT 0 = CLEAN (FP=0 FN=0, GAPS ALLOWED). EXIT 1 = REGRESSION. EXIT 2 = COMPILE FAIL.
+      - name: Run heuristic evaluation (tier-1 + tier-2)
+        working-directory: false-sharing-lab/static_analysis
+        run: python3 evaluate.py
+
+      # STEP 5: UPLOAD SCORE REPORTS AS ARTIFACT. CHECK AFTER FAILURES.
+      - name: Upload score reports
+        if: always()   # UPLOAD EVEN IF EVALUATE FAILED. HELPS DEBUG REGRESSIONS.
+        uses: actions/upload-artifact@v4
+        with:
+          name: heuristic-score-reports
+          path: false-sharing-lab/static_analysis/results/*.md
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────────────────────────────
+  # JOB 2: TIER-1 SMOKE TEST ON BENCHMARK .c.
+  # CHEAP SANITY: COMPILE false_sharing.c -> .ll, GREP FOR H2 + unpadded_counter_t.
+  # DOES NOT NEED TIER-2 BUILD. FAST. ALWAYS RUN ALONGSIDE JOB 1.
+  # ──────────────────────────────────────────────────────────────────────
+  tier1-smoke:
+    name: Tier-1 smoke test on benchmark
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ONLY NEED clang-18 AND python3. NO llvm-dev, NO cmake.
+      - name: Install clang-18 and python3
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang-18 python3
+          sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
+
+      # COMPILE BENCHMARK .c TO .ll. -O0 = STORES SURVIVE. -g = DEBUG META.
+      - name: Compile benchmark to LLVM IR
+        run: |
+          clang -S -emit-llvm -O0 -g -std=c11 -pthread \
+            false-sharing-lab/c_benchmark/false_sharing.c \
+            -o /tmp/false_sharing_bench.ll
+
+      # RUN TIER-1 ANALYZER. GREP STDOUT FOR H2 AND unpadded_counter_t.
+      # IF EITHER ABSENT -> TIER-1 REGRESSED ON CORE CASE -> FAIL BUILD.
+      - name: Run ir_analyzer.py and assert H2 + unpadded_counter_t detected
+        run: |
+          python3 false-sharing-lab/static_analysis/ir_analyzer.py \
+            /tmp/false_sharing_bench.ll > /tmp/bench_analysis.txt 2>&1
+          echo "--- ir_analyzer output ---"
+          cat /tmp/bench_analysis.txt
+          # ASSERT H2 PRESENT. MUST-PASS. REGRESSION GATE.
+          grep -q "H2" /tmp/bench_analysis.txt \
+            || { echo "FAIL: H2 not found in analysis output"; exit 1; }
+          # ASSERT TARGET STRUCT DETECTED. VALIDATES STRUCT PARSING, NOT JUST HEURISTIC.
+          grep -q "unpadded_counter_t" /tmp/bench_analysis.txt \
+            || { echo "FAIL: unpadded_counter_t not found in analysis output"; exit 1; }
+          echo "PASS: H2 and unpadded_counter_t both detected."
