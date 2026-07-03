@@ -53,7 +53,7 @@ def type_size_and_align(typename, struct_layouts):
         return count * elem_size, elem_align
 
     # STRUCT TYPE. LOOK UP IN TABLE ALREADY BUILT.
-    struct_m = re.match(r'^(%struct\.[\w.]+)$', typename)
+    struct_m = re.match(r'^(%(?:struct|union)\.[\w.]+)$', typename)
     if struct_m:
         key = struct_m.group(1)
         if key in struct_layouts:
@@ -101,7 +101,7 @@ def parse_struct_layouts(lines):
     """
     # COLLECT RAW STRUCT BODIES FIRST. ONE PASS THROUGH FILE.
     # STRUCT DECL ON ONE LINE IN -O0 IR.
-    struct_decl_re = re.compile(r'^(%struct\.[\w.]+)\s*=\s*type\s*\{([^}]*)\}')
+    struct_decl_re = re.compile(r'^(%(?:struct|union)\.[\w.]+)\s*=\s*type\s*\{([^}]*)\}')
     raw_structs = {}
     for line in lines:
         m = struct_decl_re.match(line.strip())
@@ -126,7 +126,7 @@ def parse_struct_layouts(lines):
 
         for i, ftype in enumerate(field_types):
             # NESTED STRUCT? COMPUTE ITS LAYOUT FIRST.
-            nested_m = re.match(r'(%struct\.[\w.]+)', ftype)
+            nested_m = re.match(r'(%(?:struct|union)\.[\w.]+)', ftype)
             if nested_m:
                 nested_name = nested_m.group(1)
                 if nested_name in raw_structs and nested_name not in struct_layouts:
@@ -223,9 +223,17 @@ def parse_functions(lines):
                     fn_ref = re.search(r'@(\w+)', third)
                     if fn_ref:
                         entry = fn_ref.group(1)
+                        # FOURTH ARG (INDEX 3) = THREAD ARG POINTER. H7 NEED
+                        # IT TO SEE &args[i] HANDED TO EACH THREAD.
+                        arg_reg = None
+                        if len(args) >= 4:
+                            arg_m = re.search(r'%(\w+)', args[3])
+                            if arg_m:
+                                arg_reg = arg_m.group(1)
                         # AVOID DUPLICATE.
-                        if (fn_name, entry) not in thread_entries:
-                            thread_entries.append((fn_name, entry))
+                        if all((fn_name, entry) != (c, e)
+                               for c, e, _ in thread_entries):
+                            thread_entries.append((fn_name, entry, arg_reg))
 
     return functions, thread_entries
 
@@ -289,14 +297,14 @@ def find_gep_accesses(fn_lines):
     # SLOT AND RELOADED).
 
     var_idx_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+([%@][\w.]+),\s*i64\s+%(\w+)'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%(?:struct|union)\.[\w.]+),\s*ptr\s+([%@][\w.]+),\s*i64\s+%(\w+)'
     )
     array_var_idx_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+(%struct\.[\w.]+)\],'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+(%(?:struct|union)\.[\w.]+)\],'
         r'\s*ptr\s+([%@][\w.]+),\s*i64\s+0,\s*i64\s+%(\w+)'
     )
     field_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%(\w+),\s*i32\s+0,\s*i32\s+(\d+)'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%(?:struct|union)\.[\w.]+),\s*ptr\s+%(\w+),\s*i32\s+0,\s*i32\s+(\d+)'
     )
     scalar_var_gep_re = re.compile(
         r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(' + SCALAR_TYPES_RE + r'),'
@@ -322,6 +330,14 @@ def find_gep_accesses(fn_lines):
     mem_intr_re = re.compile(
         r'@llvm\.mem(?:set|cpy|move)[\w.]*\(\s*ptr\s+(?:align\s+\d+\s+)?%(\w+)'
     )
+    # LOCK/UNLOCK TOUCH THE LOCK WORD = A WRITE TO THAT FIELD. THIS CLOSES
+    # THE OPAQUE-CALL GAP FOR THE MUTEX+DATA-SAME-LINE PATTERN (GEMINI
+    # ROADMAP PHASE 4: SYNCHRONIZATION MODELING).
+    lock_re = re.compile(
+        r'@pthread_(?:mutex_(?:lock|unlock|trylock)|spin_(?:lock|unlock|trylock)'
+        r'|rwlock_(?:rdlock|wrlock|unlock|trywrlock|tryrdlock))'
+        r'\(\s*ptr\s+(?:noundef\s+)?%(\w+)'
+    )
     any_gep_re = re.compile(r'%(\w+)\s*=\s*getelementptr\b')
     ptr_store_re = re.compile(r'\bstore\b\s+(?:volatile\s+)?ptr\s+(%\w+|@[\w.]+),\s*ptr\s+([%@][\w.]+)')
     ptr_load_re = re.compile(r'%(\w+)\s*=\s*load\s+ptr,\s*ptr\s+([%@][\w.]+)')
@@ -335,6 +351,7 @@ def find_gep_accesses(fn_lines):
     stored_registers = set()
     atomic_targets = set()
     mem_targets = set()
+    lock_targets = set()
     ptr_stores = []     # (value_token, target_token)
     ptr_loads = []      # (result_reg, slot_token)
     malloc_regs = set()
@@ -361,6 +378,10 @@ def find_gep_accesses(fn_lines):
             continue
         if '@pthread_create' in line:
             pthread_lines.append(line)
+        mK = lock_re.search(line)
+        if mK:
+            lock_targets.add(mK.group(1))
+            continue
         mI = mem_intr_re.search(line)
         if mI:
             mem_targets.add(mI.group(1))
@@ -408,7 +429,7 @@ def find_gep_accesses(fn_lines):
         for v in vals:
             flow.setdefault(v, set()).update(loads_by_slot.get(slot, ()))
 
-    write_targets = stored_registers | atomic_targets | mem_targets
+    write_targets = stored_registers | atomic_targets | mem_targets | lock_targets
 
     # DERIVED-POINTER ADJACENCY BUILT ONCE. BFS IS O(EDGES), NOT O(GEPS^2).
     children = {}
@@ -484,9 +505,11 @@ def find_gep_accesses(fn_lines):
         s for reg, (s, base) in var_geps.items()
         if written_through(reg) and base.lstrip('%') not in private
     ]
+    # LOCK CALLS COUNT AS FIELD WRITES FOR H1 (LOCK WORD LIVES IN THE FIELD).
+    # ATOMICS STAY OUT: THOSE ARE H3'S.
     field_stores = [
         (s, fi) for reg, (s, fi, base) in field_gep_map.items()
-        if reg in stored_registers and base not in private
+        if (reg in stored_registers or reg in lock_targets) and base not in private
     ]
     # H6 ONLY OWNS FREE-STANDING SCALAR ARRAYS. BASE THAT IS ITSELF A GEP
     # RESULT = ARRAY EMBEDDED IN A BIGGER OBJECT (ring->buf[i]) = STRUCT
@@ -498,7 +521,7 @@ def find_gep_accesses(fn_lines):
         and base.lstrip('%') not in gep_result_regs
     ]
 
-    return variable_index_geps, field_stores, scalar_writes
+    return variable_index_geps, field_stores, scalar_writes, var_geps
 
 
 def analyze(ll_path):
@@ -518,7 +541,7 @@ def analyze(ll_path):
 
     # STEP 3: BUILD THREAD-REACHABLE CLOSURE. START FROM THREAD ENTRIES.
     # FOLLOW CALLS TRANSITIVELY. THESE FUNCTION TOUCH SHARED DATA.
-    entry_fn_names = [entry for _, entry in thread_entry_pairs]
+    entry_fn_names = [entry for _, entry, _ in thread_entry_pairs]
     thread_reachable = build_call_closure(entry_fn_names, all_functions)
 
     findings = []
@@ -532,7 +555,7 @@ def analyze(ll_path):
         if fn_name not in all_functions:
             continue
         fn_lines = all_functions[fn_name]
-        var_idx_geps, field_stores, scalar_writes = find_gep_accesses(fn_lines)
+        var_idx_geps, field_stores, scalar_writes, _ = find_gep_accesses(fn_lines)
 
         # H6 CHECK: VARIABLE-INDEX STORE INTO SHARED SCALAR ARRAY. NO STRUCT.
         # THE DOMINANT HURON-SUITE PATTERN (false.c, locked, lockless, lu_ncb).
@@ -682,10 +705,54 @@ def analyze(ll_path):
                 ),
             })
 
+    # STEP 4D: H7 -- PTHREAD ARG ARRAY WHOSE ELEMENTS STRADDLE LINE BOUNDARIES.
+    # &args[i] HANDED TO EACH THREAD, sizeof(S) >= 64, sizeof % 64 != 0, NO
+    # 64B ALIGNMENT => NEIGHBOR ELEMENTS SHARE THE BOUNDARY LINES. THE HURON
+    # histogram MECHANISM (3096B thread_arg_t). GEMINI ROADMAP PHASE 1.
+    h7_flagged = set()
+    for caller, entry, arg_reg in thread_entry_pairs:
+        if arg_reg is None or caller not in all_functions:
+            continue
+        _, _, _, caller_var_geps = find_gep_accesses(all_functions[caller])
+        if arg_reg not in caller_var_geps:
+            continue
+        struct_name, _base = caller_var_geps[arg_reg]
+        if struct_name in h7_flagged or struct_name not in struct_layouts:
+            continue
+        layout = struct_layouts[struct_name]
+        sz = layout['size']
+        if sz < CACHE_LINE_BYTES or sz % CACHE_LINE_BYTES == 0:
+            continue
+        if layout['align'] >= CACHE_LINE_BYTES:
+            continue
+        h7_flagged.add(struct_name)
+        findings.append({
+            'heuristic': 'H7',
+            'severity': 'MEDIUM',
+            'struct': struct_name,
+            'struct_size_bytes': sz,
+            'elements_per_cache_line': None,
+            'thread_fn': entry,
+            'detail': (
+                f"Per-thread arg array of {struct_name} (size={sz}B, "
+                f"{sz} % {CACHE_LINE_BYTES} = {sz % CACHE_LINE_BYTES}, "
+                f"alignment < {CACHE_LINE_BYTES}B): pthread_create hands "
+                f"&args[i] to each thread, so neighbouring elements straddle "
+                f"shared cache lines at their boundaries even though each "
+                f"thread only touches its own element."
+            ),
+            'fix': (
+                f"Pad {struct_name} to a multiple of {CACHE_LINE_BYTES}B and "
+                f"allocate the array with aligned_alloc({CACHE_LINE_BYTES}, ...) "
+                f"or alignas({CACHE_LINE_BYTES})."
+            ),
+        })
+
     # STEP 5: SUPPRESSION POST-FILTER. POLICY LIVE IN ONE PLACE, NOT SCATTERED GUARDS.
     # STRONGER FINDING FOR SAME STRUCT WIN. WEAKER ONE IS SAME ADVICE, JUST NOISE.
-    # H2 BEAT H1 AND H4. H1 BEAT H4. REVIEW FOUND H1+H4 DOUBLE-FIRE ON >64B STRUCT.
-    SUPPRESSES = {'H2': {'H1', 'H4'}, 'H1': {'H4'}}
+    # H2 BEAT H1 AND H4. H1 BEAT H4. H7 BEAT H4 (SAME STRADDLE ADVICE, MORE
+    # CONTEXT). REVIEW FOUND H1+H4 DOUBLE-FIRE ON >64B STRUCT.
+    SUPPRESSES = {'H2': {'H1', 'H4'}, 'H1': {'H4'}, 'H7': {'H4'}}
     fired_by = {}  # struct -> set of heuristics that fired
     for f in findings:
         fired_by.setdefault(f['struct'], set()).add(f['heuristic'])
@@ -759,7 +826,13 @@ def main():
     )
     parser.add_argument('ll_file', help="Path to the .ll file to analyze")
     parser.add_argument('--json', action='store_true', help="Output findings as JSON instead of human-readable text")
+    parser.add_argument('--line-size', type=int, default=64,
+                        help="Cache line size in bytes (default 64; e.g. 128 for Apple M-series L2)")
     args = parser.parse_args()
+
+    # PARAMETRIZED TOPOLOGY (GEMINI ROADMAP PHASE 6). ONE GLOBAL, SET ONCE.
+    global CACHE_LINE_BYTES
+    CACHE_LINE_BYTES = args.line_size
 
     ll_path = Path(args.ll_file)
     if not ll_path.exists():

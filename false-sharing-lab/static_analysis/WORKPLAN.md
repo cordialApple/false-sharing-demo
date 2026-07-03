@@ -93,6 +93,29 @@ H7 large-struct boundary mechanism (histogram flagged via H6 but with
 imprecise rationale), nested-field attribution, opaque-call escape,
 fn-ptr thread entry, tier1 H3/H5.
 
+## Round 5 — Gemini roadmap adoption: H7 + sync modeling + topology (2026-07-03)
+
+Source: Gemini's implementation_plan.md (7-phase frontier roadmap). Adopted
+phases 1, 4, 6a; deferred 2 (allocator modeling), 3 (SCEV symbolic offsets),
+5 (interprocedural/LTO), 6b (prefetcher), 7 (auto-padder) as future rounds.
+
+| Phase | Task | Status |
+|---|---|---|
+| 19. H7 both tiers | pthread_create arg = &args[i] (var-index GEP), sizeof >= 64, sizeof % 64 != 0, align < 64 -> boundary-straddle warning; suppresses H4 | DONE |
+| 20. Lock-call write modeling | pthread mutex/spin/rwlock lock/unlock counts as a write to the lock-word field (H1 evidence + H2/H6 write requirement) | DONE — closes adv_tp_mutex_data_same_line GAP both tiers |
+| 21. Union layouts (tier1) | %union.* parsed like %struct.* (LLVM lowers unions to single-member structs); mutex arrays now sized | DONE |
+| 22. Parametrized line size | tier1 --line-size N; tier2 FS_CACHE_LINE_BYTES env (clamped 16..4096) | DONE |
+
+### Round-5 scores (23 cases, exit 0)
+
+| Analyzer | TP | FP | FN | GAP | Precision | Recall |
+|---|---|---|---|---|---|---|
+| tier1 | 9 | 0 | 0 | 4 | 1.00 | 1.00 |
+| tier2 | 11 | 0 | 0 | 2 | 1.00 | 1.00 |
+
+Huron: histogram upgraded to a full HIT (H7 on thread_arg_t, both tiers);
+locked_toy mutex-array H2 restored in both tiers. Recall stays 7/7.
+
 ## Architecture (mirrors c_benchmark + agent workflow)
 
 ```

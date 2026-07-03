@@ -99,8 +99,8 @@
           "severity": "MEDIUM"
         }
       ],
-      "known_limitation": true,
-      "notes": "Both tiers MISS. Tier2 correctly resolves struct layout (m at offset 0/size 40, counter at offset 40/size 8, total 48B). H1 requires >=2 fields directly GEP-stored in thread fns. In -O0 IR, pthread_mutex_lock(&p->m) is an opaque call; only p->counter is written via explicit GEP store. Analyzer sees only 1 thread-written field per struct. GAP: opaque-call side-effects on struct fields are invisible to static GEP analysis."
+      "known_limitation": false,
+      "notes": "Lock-call modeling (both tiers): pthread_mutex_lock/unlock(&p->m) counts as a write to the lock-word field, so H1 sees m (offset 0) + counter (offset 40) in bucket 0 and fires. Was a labeled opaque-call GAP before the synchronization-modeling round."
     },
     {
       "file": "advanced/adv_tp_ring_head_tail.c",
@@ -191,6 +191,18 @@
       "expected": [],
       "known_limitation": false,
       "notes": "Thread mallocs own two-field scratch struct and writes both fields (same 64B bucket). Regression test for the H1 instance-privacy fix (Huron lu_ncb LocalCopies FP): pointer born from malloc inside the thread fn, never stored outside local allocas, never passed to pthread_create, never returned -> instance is thread-private, H1 must stay quiet."
+    },
+    {
+      "file": "advanced/adv_tp_boundary_args.c",
+      "expected": [
+        {
+          "heuristic": "H7",
+          "struct_contains": "barg_t",
+          "severity": "MEDIUM"
+        }
+      ],
+      "known_limitation": false,
+      "notes": "Huron histogram mechanism: per-thread arg struct of 104B (104 % 64 = 40), pthread_create hands &args[i] to each thread. Each thread writes only its own element but neighbouring elements straddle shared boundary lines. H7 checks the pthread_create arg GEP: variable index, sizeof >= 64, sizeof % 64 != 0, align < 64."
     },
     {
       "file": "advanced/adv_tn_readonly_tid_array.c",

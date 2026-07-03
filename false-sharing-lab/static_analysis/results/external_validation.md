@@ -135,6 +135,32 @@ corpus cases and all 7 Huron hits unchanged. The 1.00 in-house corpus scores rem
 generalization claims — but the external gap has closed from 0.14 to 1.00
 recall on this suite.
 
+## Round 3 — H7 + synchronization modeling (2026-07-03, branch `h7-round`)
+
+Adopted from the Gemini improvement roadmap: H7 (phase 1), lock-call write
+modeling (phase 4), parametrized cache-line size (phase 6a).
+
+- **`histogram` upgrades from qualified to full HIT:** H7 now flags
+  `%struct.thread_arg_t` itself (both tiers) — pthread_create hands `&args[i]`
+  to each thread, 3096 % 64 ≠ 0, alignment < 64 — the exact mechanism Huron's
+  padding + `aligned_alloc(64)` fix addressed. The H6 hoisted-pointer finding
+  remains as a secondary signal.
+- **Lock modeling restores the mutex-array finding:** `pthread_mutex_lock`
+  counts as a write to the lock word, so the round-1 "plausible" H2 on
+  `locked/toy.c`'s `%union.pthread_mutex_t` array is back — now in BOTH tiers
+  (tier1 additionally learned to parse `%union.*` layouts, which LLVM lowers
+  to single-member structs).
+- In-house corpus: 23 cases, both tiers 0 FP / 0 FN, exit 0. The
+  `adv_tp_mutex_data_same_line` opaque-call GAP is now a PASS in both tiers.
+- Cache line size is parametrized: tier1 `--line-size N`, tier2
+  `FS_CACHE_LINE_BYTES` env (verified: 128 → 16 elements/line on the 8B
+  tid-array case).
+
+Recall vs ground truth stays 7/7; `string_match` remains the one qualified
+hit (allocator adjacency is statically invisible; H6 catches the right
+buffers for a related-but-different reason). Extras unchanged from round 2
+plus the restored mutex-array finding (plausible, not in Huron's fix).
+
 ## Reproduce
 
 ```sh

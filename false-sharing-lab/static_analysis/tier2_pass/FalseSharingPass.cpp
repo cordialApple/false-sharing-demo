@@ -23,6 +23,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <map>
 #include <set>
 #include <string>
@@ -30,9 +31,20 @@
 
 using namespace llvm;
 
-// CACHE LINE = 64 BYTE. UNIVERSAL LAW OF PROCESSOR LAND.
-// TWO THREAD TOUCH SAME 64 BYTE. LINE PING PONG BETWEEN CORE. VERY SLOW.
-static const uint64_t CACHE_LINE_BYTES = 64;
+// CACHE LINE = 64 BYTE DEFAULT. OVERRIDE VIA FS_CACHE_LINE_BYTES ENV FOR
+// OTHER TOPOLOGIES (E.G. 128B DESTRUCTIVE-INTERFERENCE TARGETS).
+static uint64_t CACHE_LINE_BYTES = 64;
+
+// LOCK/UNLOCK WRITE THE LOCK WORD. MODELING THEM AS FIELD WRITES CLOSES
+// THE OPAQUE-CALL GAP FOR MUTEX+DATA-SAME-LINE PATTERNS.
+static bool isLockFnName(StringRef n) {
+  return n == "pthread_mutex_lock" || n == "pthread_mutex_unlock" ||
+         n == "pthread_mutex_trylock" || n == "pthread_spin_lock" ||
+         n == "pthread_spin_unlock" || n == "pthread_spin_trylock" ||
+         n == "pthread_rwlock_rdlock" || n == "pthread_rwlock_wrlock" ||
+         n == "pthread_rwlock_unlock" || n == "pthread_rwlock_trywrlock" ||
+         n == "pthread_rwlock_tryrdlock";
+}
 
 namespace {
 
@@ -240,6 +252,12 @@ static bool hasStoreThrough(Value *root) {
       } else if (auto *MI = dyn_cast<MemIntrinsic>(u)) {
         // memset(&arr[tid],0,n) HAS NO StoreInst. DEST IS STILL A WRITE.
         if (MI->getRawDest() == v)
+          return true;
+      } else if (auto *LC = dyn_cast<CallBase>(u)) {
+        // LOCKING WRITES THE LOCK WORD BEHIND THE CALL.
+        Function *cal = LC->getCalledFunction();
+        if (cal && isLockFnName(cal->getName()) && LC->arg_size() >= 1 &&
+            LC->getArgOperand(0) == v)
           return true;
       } else if (isa<GetElementPtrInst>(u) || isa<BitCastInst>(u) ||
                  isa<PHINode>(u) || isa<SelectInst>(u)) {
@@ -474,15 +492,27 @@ static void runH1(FSContext &Ctx) {
       continue;
     for (BasicBlock &BB : *F) {
       for (Instruction &I : BB) {
-        auto *SI = dyn_cast<StoreInst>(&I);
-        if (!SI || SI->isAtomic())
-          continue; // ATOMIC BELONG TO H3.
+        Value *wptr = nullptr;
+        if (auto *SI = dyn_cast<StoreInst>(&I)) {
+          if (SI->isAtomic())
+            continue; // ATOMIC BELONG TO H3.
+          wptr = SI->getPointerOperand();
+        } else if (auto *CB = dyn_cast<CallBase>(&I)) {
+          // LOCK CALL = WRITE TO THE LOCK-WORD FIELD. CLOSES THE
+          // MUTEX+DATA-SAME-LINE OPAQUE-CALL GAP.
+          Function *cal = CB->getCalledFunction();
+          if (!cal || !isLockFnName(cal->getName()) || CB->arg_size() < 1)
+            continue;
+          wptr = CB->getArgOperand(0);
+        } else {
+          continue;
+        }
         StructType *st = nullptr;
         unsigned fi = 0;
-        if (!getStructField(Ctx.DL, SI->getPointerOperand(), st, fi))
+        if (!getStructField(Ctx.DL, wptr, st, fi))
           continue;
         // PER-THREAD PRIVATE INSTANCE CANNOT FALSE-SHARE WITH ITSELF.
-        if (isThreadPrivateAlloc(resolveBase(SI->getPointerOperand()), F))
+        if (isThreadPrivateAlloc(resolveBase(wptr), F))
           continue;
         acc[structKey(st)][fi].insert(F->getName().str());
         keyToTy[structKey(st)] = st;
@@ -873,6 +903,69 @@ static void runH6(FSContext &Ctx) {
 }
 
 // ========================================================================
+// HEURISTIC H7 (MEDIUM) -- PTHREAD ARG ARRAY WHOSE ELEMENTS STRADDLE LINE
+// BOUNDARIES. pthread_create HANDS &args[i] (VARIABLE-INDEX GEP) TO EACH
+// THREAD; sizeof(S) >= 64, sizeof % 64 != 0, ALIGN < 64 => NEIGHBOURS SHARE
+// BOUNDARY LINES EVEN IF EACH THREAD ONLY TOUCHES ITS OWN ELEMENT. THE
+// HURON histogram MECHANISM (3096B thread_arg_t).
+// ========================================================================
+static void runH7(FSContext &Ctx) {
+  std::set<std::string> flagged;
+  for (Function &F : Ctx.M) {
+    for (BasicBlock &BB : F) {
+      for (Instruction &I : BB) {
+        auto *CB = dyn_cast<CallBase>(&I);
+        if (!CB)
+          continue;
+        Function *callee = CB->getCalledFunction();
+        if (!callee || callee->getName() != "pthread_create" ||
+            CB->arg_size() < 4)
+          continue;
+        auto *G = dyn_cast<GEPOperator>(
+            CB->getArgOperand(3)->stripPointerCasts());
+        if (!G)
+          continue;
+        GepInfo gi = analyzeGep(G);
+        if (!gi.structTy || !gi.variableArrayIndex)
+          continue;
+        uint64_t sz = Ctx.DL.getStructLayout(gi.structTy)->getSizeInBytes();
+        if (sz < CACHE_LINE_BYTES || sz % CACHE_LINE_BYTES == 0)
+          continue;
+        if (Ctx.DL.getABITypeAlign(gi.structTy).value() >= CACHE_LINE_BYTES)
+          continue;
+        std::string key = structKey(gi.structTy);
+        if (!flagged.insert(key).second)
+          continue;
+        std::string entry = "(unknown)";
+        if (auto *EF = dyn_cast<Function>(
+                CB->getArgOperand(2)->stripPointerCasts()))
+          entry = EF->getName().str();
+        Finding f;
+        f.heuristic = "H7";
+        f.severity = "MEDIUM";
+        f.structName = key;
+        f.structSizeBytes = (int64_t)sz;
+        f.hasEPL = false;
+        f.hasThreadFn = true;
+        f.threadFn = entry;
+        f.detail = formatv(
+            "Per-thread arg array of {0} (size={1}B, {1} % {2} = {3}, "
+            "alignment < {2}B): pthread_create hands &args[i] to each "
+            "thread, so neighbouring elements straddle shared cache lines "
+            "at their boundaries even though each thread only touches its "
+            "own element.",
+            key, sz, CACHE_LINE_BYTES, sz % CACHE_LINE_BYTES).str();
+        f.fix = formatv(
+            "Pad {0} to a multiple of {1}B and allocate the array with "
+            "aligned_alloc({1}, ...) or alignas({1}).",
+            key, CACHE_LINE_BYTES).str();
+        Ctx.findings.push_back(std::move(f));
+      }
+    }
+  }
+}
+
+// ========================================================================
 // SUPPRESSION POST-FILTER. ONE PLACE FOR ALL "X BEATS Y" POLICY.
 // TABLE: H2 SUPPRESS {H1, H4}. H1 SUPPRESS {H4}. H3/H5 NEVER TOUCHED.
 // RULE: DROP FINDING IF DOMINATING HEURISTIC ALREADY WARN SAME STRUCT.
@@ -883,7 +976,7 @@ static void applySuppression(FSContext &Ctx) {
   // TABLE OF DOMINANCE. victim -> LIST OF HEURISTIC THAT SILENCE IT.
   static const std::map<std::string, std::vector<std::string>> suppressedBy = {
       {"H1", {"H2"}},
-      {"H4", {"H2", "H1"}},
+      {"H4", {"H2", "H1", "H7"}},
   };
 
   // COLLECT WHICH (heuristic, struct) PAIR FIRED. LOOKUP BOWL.
@@ -1000,6 +1093,12 @@ static void emitJson(FSContext &Ctx) {
 // ------------------------------------------------------------------------
 struct FalseSharingPass : PassInfoMixin<FalseSharingPass> {
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &) {
+    // PARAMETRIZED TOPOLOGY. ENV OVERRIDE, SANITY-CLAMPED TO POWER-OF-TWO-ISH RANGE.
+    if (const char *e = std::getenv("FS_CACHE_LINE_BYTES")) {
+      uint64_t v = std::strtoull(e, nullptr, 10);
+      if (v >= 16 && v <= 4096)
+        CACHE_LINE_BYTES = v;
+    }
     FSContext Ctx(M);
     discoverThreadReachable(Ctx);
 
@@ -1008,6 +1107,7 @@ struct FalseSharingPass : PassInfoMixin<FalseSharingPass> {
     runH1(Ctx);   // MEDIUM -- TWO FIELD SAME LINE.
     runH5(Ctx);   // MEDIUM -- TWO SMALL GLOBAL.
     runH6(Ctx);   // MEDIUM -- SCALAR ARRAY INDEXED BY THREAD.
+    runH7(Ctx);   // MEDIUM -- THREAD-ARG ARRAY STRADDLING BOUNDARIES.
     runH4(Ctx);   // LOW  -- STRADDLE ARRAY ELEMENT.
 
     // ONE SUPPRESSION PASS AFTER ALL HEURISTIC SPEAK. POLICY IN ONE PLACE.
