@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# GROK IR ANALYZER. GROK READ LLVM WORDS. GROK FIND BAD STRUCT. GROK WARN HUMAN.
-# NO LLVMLITE. GROK USE REGEX. CAVEMAN TOOLS FOR CAVEMAN JOB.
+# IR ANALYZER. READ LLVM WORDS. FIND BAD STRUCT. WARN HUMAN.
+# NO LLVMLITE. USE REGEX. CAVEMAN TOOLS FOR CAVEMAN JOB.
 # LLVM 18 USE OPAQUE POINTER. ptr EVERYWHERE. NOT i64* OR %struct.X*. JUST ptr.
-# GROK LEARN NEW LLVM WAY. ADAPT OR DIE.
+# LEARN NEW LLVM WAY. ADAPT OR DIE.
 
 import re
 import sys
@@ -11,10 +11,10 @@ import argparse
 from pathlib import Path
 
 # CACHE LINE SIZE. UNIVERSAL LAW OF PROCESSOR LAND. 64 BYTES.
-# TWO THREAD TOUCH SAME 64 BYTES. LINE BOUNCE BETWEEN CORE. VERY SLOW. GROK ANGRY.
+# TWO THREAD TOUCH SAME 64 BYTES. LINE BOUNCE BETWEEN CORE. VERY SLOW.
 CACHE_LINE_BYTES = 64
 
-# TYPE SIZE TABLE. GROK KNOW HOW BIG EACH LLVM SCALAR TYPE.
+# TYPE SIZE TABLE. KNOW HOW BIG EACH LLVM SCALAR TYPE.
 # ALIGNMENT = MIN(SIZE, 8) FOR SCALAR. THIS IS SYSV x86-64 ABI RULE.
 BASE_TYPE_SIZES = {
     'i1': 1, 'i8': 1, 'i16': 2, 'i32': 4, 'i64': 8, 'i128': 16,
@@ -28,7 +28,7 @@ BASE_TYPE_SIZES = {
 
 def align_up(offset, alignment):
     # ROUND OFFSET UP TO ALIGNMENT. MATH. NOT MAGIC.
-    # IF ALIGNMENT ZERO GROK CONFUSED. RETURN OFFSET UNCHANGED.
+    # IF ALIGNMENT ZERO, RETURN OFFSET UNCHANGED.
     if alignment <= 0:
         return offset
     return (offset + alignment - 1) & ~(alignment - 1)
@@ -36,7 +36,7 @@ def align_up(offset, alignment):
 
 def type_size_and_align(typename, struct_layouts):
     """Return (size_bytes, alignment_bytes) for a given LLVM type string."""
-    # GROK CHECK SIMPLE TYPE FIRST. FAST PATH.
+    # CHECK SIMPLE TYPE FIRST. FAST PATH.
     if typename in BASE_TYPE_SIZES:
         size = BASE_TYPE_SIZES[typename]
         return size, min(size, 8)
@@ -49,10 +49,10 @@ def type_size_and_align(typename, struct_layouts):
         elem_type = arr_m.group(2).strip()
         elem_size, elem_align = type_size_and_align(elem_type, struct_layouts)
         if elem_size == 0:
-            return 0, 1  # UNKNOWN ELEMENT. GROK GIVE UP.
+            return 0, 1  # UNKNOWN ELEMENT. GIVE UP.
         return count * elem_size, elem_align
 
-    # STRUCT TYPE. LOOK UP IN TABLE GROK ALREADY BUILT.
+    # STRUCT TYPE. LOOK UP IN TABLE ALREADY BUILT.
     struct_m = re.match(r'^(%struct\.[\w.]+)$', typename)
     if struct_m:
         key = struct_m.group(1)
@@ -60,7 +60,7 @@ def type_size_and_align(typename, struct_layouts):
             info = struct_layouts[key]
             return info['size'], info['align']
 
-    # UNKNOWN TYPE. GROK NOT KNOW. RETURN ZERO. CALLER HANDLE.
+    # UNKNOWN TYPE. NOT KNOW. RETURN ZERO. CALLER HANDLE.
     return 0, 1
 
 
@@ -69,7 +69,7 @@ def split_type_list(body):
     Split a comma-separated LLVM type list, respecting nested brackets.
     E.g. "i64, [56 x i8]" -> ["i64", "[56 x i8]"]
     """
-    # GROK SPLIT CAREFUL. BRACKET INSIDE BRACKET CONFUSE SIMPLE COMMA SPLIT.
+    # SPLIT CAREFUL. BRACKET INSIDE BRACKET CONFUSE SIMPLE COMMA SPLIT.
     # DEPTH COUNTER TRACK HOW DEEP INSIDE BRACKET. ONLY SPLIT AT DEPTH ZERO.
     tokens = []
     depth = 0
@@ -99,8 +99,8 @@ def parse_struct_layouts(lines):
     struct size rounded up to max member alignment).
     Returns dict: '%struct.Name' -> {fields: [...], size: int, align: int}
     """
-    # GROK COLLECT RAW STRUCT BODIES FIRST. ONE PASS THROUGH FILE.
-    # STRUCT DECL ON ONE LINE IN -O0 IR. GROK LUCKY.
+    # COLLECT RAW STRUCT BODIES FIRST. ONE PASS THROUGH FILE.
+    # STRUCT DECL ON ONE LINE IN -O0 IR.
     struct_decl_re = re.compile(r'^(%struct\.[\w.]+)\s*=\s*type\s*\{([^}]*)\}')
     raw_structs = {}
     for line in lines:
@@ -108,7 +108,7 @@ def parse_struct_layouts(lines):
         if m:
             raw_structs[m.group(1)] = m.group(2).strip()
 
-    # GROK NOW COMPUTE LAYOUTS. RECURSIVE FOR NESTED STRUCT.
+    # NOW COMPUTE LAYOUTS. RECURSIVE FOR NESTED STRUCT.
     struct_layouts = {}
 
     def compute_layout(name, body, depth=0):
@@ -135,7 +135,7 @@ def parse_struct_layouts(lines):
             fsize, falign = type_size_and_align(ftype, struct_layouts)
 
             if fsize == 0:
-                # UNKNOWN TYPE. GROK MARK AND SKIP. NO CRASH.
+                # UNKNOWN TYPE. MARK AND SKIP. NO CRASH.
                 fields.append({
                     'index': i, 'type': ftype,
                     'offset': offset, 'size': 0, 'unknown': True,
@@ -173,7 +173,7 @@ def parse_functions(lines):
     Also extract thread entry functions from pthread_create calls.
     Returns (functions_dict, [(caller_fn, entry_fn), ...])
     """
-    # GROK WALK FILE. FIND DEFINE. COLLECT LINES UNTIL CLOSE BRACE.
+    # WALK FILE. FIND DEFINE. COLLECT LINES UNTIL CLOSE BRACE.
     # BRACE DEPTH TRACK WHERE FUNCTION ENDS. SIMPLE STATE MACHINE.
     functions = {}
     thread_entries = []
@@ -189,7 +189,7 @@ def parse_functions(lines):
         stripped = line.strip()
 
         if fn_def_re.match(stripped):
-            # NEW FUNCTION START. GROK EXCITED.
+            # NEW FUNCTION START.
             m = fn_def_re.match(stripped)
             current_fn = m.group(1)
             current_lines = [stripped]
@@ -200,13 +200,13 @@ def parse_functions(lines):
             current_lines.append(stripped)
             brace_depth += stripped.count('{') - stripped.count('}')
             if brace_depth <= 0:
-                # FUNCTION DONE. GROK SAVE.
+                # FUNCTION DONE. SAVE.
                 functions[current_fn] = current_lines
                 current_fn = None
                 current_lines = []
                 brace_depth = 0
 
-    # GROK SCAN ALL FUNCTION BODIES FOR PTHREAD_CREATE CALLS.
+    # SCAN ALL FUNCTION BODIES FOR PTHREAD_CREATE CALLS.
     # PTHREAD_CREATE THIRD ARG IS THREAD ENTRY FUNCTION. VERY IMPORTANT.
     # LINE LOOK LIKE: call i32 @pthread_create(ptr %a, ptr null, ptr @entry_fn, ptr %arg)
     pthread_re = re.compile(r'call\s+i32\s+@pthread_create\s*\(([^)]+)\)')
@@ -223,7 +223,7 @@ def parse_functions(lines):
                     fn_ref = re.search(r'@(\w+)', third)
                     if fn_ref:
                         entry = fn_ref.group(1)
-                        # AVOID DUPLICATE. GROK REMEMBER.
+                        # AVOID DUPLICATE.
                         if (fn_name, entry) not in thread_entries:
                             thread_entries.append((fn_name, entry))
 
@@ -233,9 +233,9 @@ def parse_functions(lines):
 def build_call_closure(start_fns, all_functions):
     """
     Transitively follow call edges from start_fns to find all reachable functions.
-    This is GROK's call graph. Not perfect (no function pointers). Good enough for POC.
+    This is the call graph. Not perfect (no function pointers). Good enough for POC.
     """
-    # GROK FOLLOW CALLS LIKE HUNTING. START AT THREAD ENTRY. CHASE EVERY CALL.
+    # FOLLOW CALLS LIKE HUNTING. START AT THREAD ENTRY. CHASE EVERY CALL.
     # STOP WHEN NO NEW FUNCTION FOUND. BFS STYLE.
     call_re = re.compile(r'\bcall\b.*?@(\w+)\s*\(')
     reachable = set(start_fns)
@@ -248,7 +248,7 @@ def build_call_closure(start_fns, all_functions):
         for line in all_functions[fn]:
             for m in call_re.finditer(line):
                 callee = m.group(1)
-                # SKIP LLVM INTRINSICS. THEY START WITH llvm. GROK NOT CARE.
+                # SKIP LLVM INTRINSICS. THEY START WITH llvm. NOT CARE.
                 if callee.startswith('llvm'):
                     continue
                 if callee not in reachable and callee in all_functions:
@@ -266,7 +266,7 @@ def find_gep_accesses(fn_lines):
       variable_index_geps: list of struct names accessed with variable i64 index (H2 signal)
       field_stores:        list of (struct_name, field_idx) pairs for fields written (H1 signal)
     """
-    # GROK LOOK FOR TWO GEP PATTERNS:
+    # LOOK FOR TWO GEP PATTERNS:
     #
     # PATTERN 1 (H2 SIGNAL): ARRAY-OF-STRUCT INDEXING. VARIABLE INDEX.
     #   %reg = getelementptr inbounds %struct.X, ptr %base, i64 %var_idx
@@ -284,7 +284,7 @@ def find_gep_accesses(fn_lines):
 
     # H2 SHAPE 2: GLOBAL/STACK FIXED ARRAY OF STRUCTS. GEP SOURCE TYPE IS ARRAY.
     #   %reg = getelementptr inbounds [4 x %struct.X], ptr @g, i64 0, i64 %var
-    # CORPUS CASE adv_tp_stats_array TAUGHT GROK THIS SHAPE. LSHAZ FOUND SAME
+    # CORPUS CASE adv_tp_stats_array TAUGHT THIS SHAPE. LSHAZ FOUND SAME
     # PATTERN IN LLVM TrackingStatistic. ELEMENT MUST BE STRUCT — SCALAR ARRAY
     # ([8 x i64]) IS H6 TERRITORY, NOT H2. BASE CAN BE @GLOBAL OR %REG.
     array_var_idx_gep_re = re.compile(
@@ -297,10 +297,10 @@ def find_gep_accesses(fn_lines):
         r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%\w+,\s*i32\s+0,\s*i32\s+(\d+)'
     )
 
-    # STORE INSTRUCTION. GROK FIND WRITE TO MEMORY.
+    # STORE INSTRUCTION. FIND WRITE TO MEMORY.
     # store TYPE VALUE, ptr %TARGET
     # OPTIONAL volatile TOKEN. CLANG EMIT 'store volatile i64 ...' FOR VOLATILE FIELD.
-    # REVIEW FOUND GROK MISS THOSE. VOLATILE FIELD IS EXACTLY THE HOT KIND. MUST SEE.
+    # REVIEW FOUND THESE MISSED. VOLATILE FIELD IS EXACTLY THE HOT KIND. MUST SEE.
     store_re = re.compile(r'\bstore\b\s+(?:volatile\s+)?\S+\s+\S+,\s*ptr\s+%(\w+)')
 
     variable_index_geps = []   # struct names from H2-pattern GEPs
@@ -344,18 +344,18 @@ def analyze(ll_path):
     Main analysis entry point.
     Parses the .ll file, applies H2/H1/H4 heuristics, returns findings list.
     """
-    # GROK READ WHOLE FILE. ALL LINES. KEEP NEWLINES FOR LINE-ORIENTED PARSING.
+    # READ WHOLE FILE. ALL LINES. KEEP NEWLINES FOR LINE-ORIENTED PARSING.
     with open(ll_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    # STEP 1: PARSE STRUCT LAYOUTS. GROK LEARN SHAPE OF DATA.
+    # STEP 1: PARSE STRUCT LAYOUTS. LEARN SHAPE OF DATA.
     struct_layouts = parse_struct_layouts(lines)
 
     # STEP 2: PARSE FUNCTION BODIES. ALSO FIND THREAD ENTRIES FROM PTHREAD_CREATE.
     all_functions, thread_entry_pairs = parse_functions(lines)
 
     # STEP 3: BUILD THREAD-REACHABLE CLOSURE. START FROM THREAD ENTRIES.
-    # GROK FOLLOW CALLS TRANSITIVELY. THESE FUNCTION TOUCH SHARED DATA.
+    # FOLLOW CALLS TRANSITIVELY. THESE FUNCTION TOUCH SHARED DATA.
     entry_fn_names = [entry for _, entry in thread_entry_pairs]
     thread_reachable = build_call_closure(entry_fn_names, all_functions)
 
@@ -414,7 +414,7 @@ def analyze(ll_path):
             h1_accesses[struct_name].append((field_idx, fn_name))
 
     # STEP 4B: H1 CHECK. TWO FIELDS OF SAME STRUCT IN SAME 64B BUCKET, BOTH STORED.
-    # GROK CHECK: IF TWO THREAD WRITE DIFFERENT FIELD BUT SAME CACHE LINE, STILL BAD.
+    # CHECK: IF TWO THREAD WRITE DIFFERENT FIELD BUT SAME CACHE LINE, STILL BAD.
     # THIS HAPPEN WHEN STRUCT HAVE HOT FIELD AND COLD FIELD ON SAME 64B LINE.
     for struct_name, accesses in h1_accesses.items():
         if struct_name not in struct_layouts:
@@ -501,7 +501,7 @@ def analyze(ll_path):
 
 def format_human(findings, struct_layouts, thread_reachable, entry_fn_names, ll_path):
     """Format findings as a human-readable report string."""
-    # GROK WRITE REPORT. HUMAN READ. HUMAN UNDERSTAND. HUMAN FIX CODE.
+    # WRITE REPORT. HUMAN READ. HUMAN UNDERSTAND. HUMAN FIX CODE.
     lines = []
     lines.append("=" * 70)
     lines.append("FALSE SHARING STATIC ANALYSIS REPORT")
@@ -526,7 +526,7 @@ def format_human(findings, struct_layouts, thread_reachable, entry_fn_names, ll_
 
     # FINDINGS.
     if not findings:
-        lines.append("NO FINDINGS. ALL CLEAR. GROK HAPPY.")
+        lines.append("NO FINDINGS. ALL CLEAR.")
     else:
         sev_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
         sorted_findings = sorted(findings, key=lambda f: sev_order.get(f['severity'], 9))
@@ -567,11 +567,11 @@ def main():
         print(f"ERROR: File not found: {ll_path}", file=sys.stderr)
         sys.exit(1)
 
-    # GROK RUN ANALYSIS. THIS IS THE MAIN EVENT.
+    # RUN ANALYSIS. THIS IS THE MAIN EVENT.
     findings, struct_layouts, thread_reachable, entry_fn_names = analyze(ll_path)
 
     if args.json:
-        # JSON OUTPUT FOR AGENT. MACHINE READABLE. GROK SERVE AGENT.
+        # JSON OUTPUT FOR AGENT. MACHINE READABLE. SERVE AGENT.
         output = {
             'file': str(ll_path),
             'thread_entries': entry_fn_names,
@@ -588,7 +588,7 @@ def main():
         }
         print(json.dumps(output, indent=2))
     else:
-        # HUMAN READABLE OUTPUT. GROK TALK TO HUMAN.
+        # HUMAN READABLE OUTPUT. TALK TO HUMAN.
         print(format_human(findings, struct_layouts, thread_reachable, entry_fn_names, ll_path))
 
 

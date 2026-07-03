@@ -1,5 +1,5 @@
 // TP H5 ADJACENT GLOBALS
-// GROK MAKE TWO PLAIN GLOBAL LONGS. NO STRUCT. DIFFERENT THREADS WRITE EACH.
+// MAKE TWO PLAIN GLOBAL LONGS. NO STRUCT. DIFFERENT THREADS WRITE EACH.
 // LINKER PLACE THESE ADJACENT IN .BSS SECTION. BOTH FIT IN SAME 64-BYTE LINE.
 // THREAD A WRITE counter_a. THREAD B WRITE counter_b. SAME LINE. BAD.
 // EXPECTED: H5 on globals counter_a and counter_b
@@ -14,7 +14,7 @@ long counter_a = 0;  // GLOBAL LONG. THREAD A WRITE. LIKELY ADJACENT TO counter_
 long counter_b = 0;  // GLOBAL LONG. THREAD B WRITE. SAME LINE AS counter_a.
 
 void *thread_a(void *arg) {
-    // GROK THREAD A. WRITE counter_a IN LOOP. DIRECT GLOBAL ACCESS.
+    // THREAD A. WRITE counter_a IN LOOP. DIRECT GLOBAL ACCESS.
     // IR: store i64 %val, ptr @counter_a  (GLOBAL, NOT REGISTER PTR)
     for (int i = 0; i < 1000000; i++) {
         counter_a++;
@@ -23,7 +23,7 @@ void *thread_a(void *arg) {
 }
 
 void *thread_b(void *arg) {
-    // GROK THREAD B. WRITE counter_b. ADJACENT GLOBAL. SAME CACHE LINE.
+    // THREAD B. WRITE counter_b. ADJACENT GLOBAL. SAME CACHE LINE.
     // IR: store i64 %val, ptr @counter_b  (GLOBAL, NOT REGISTER PTR)
     for (int i = 0; i < 1000000; i++) {
         counter_b++;

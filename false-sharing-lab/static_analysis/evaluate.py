@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# EVALUATE.PY - GROK SCORE HEURISTICS. GROUND TRUTH CORPUS. HONEST NUMBERS.
-# GROK NOT LIE. IF TIER-1 MISS, TABLE SHOW MISS. IF TIER-1 FP, TABLE SHOW FP.
+# EVALUATE.PY - SCORE HEURISTICS. GROUND TRUTH CORPUS. HONEST NUMBERS.
+# NOT LIE. IF TIER-1 MISS, TABLE SHOW MISS. IF TIER-1 FP, TABLE SHOW FP.
 # WHOLE POINT: MEASURE COVERAGE GAPS. NOT HIDE THEM.
 #
 # USAGE: python evaluate.py
@@ -21,14 +21,14 @@ from pathlib import Path
 # TIER-2: (COMMENTED) OPT LLVM PASS. UNCOMMENT WHEN PASS LANDS.
 # ============================================================
 ANALYZERS = {
-    # {python} = sys.executable. WINDOWS python3 IS FAKE STORE STUB. GROK NOT TRUST NAME.
+    # {python} = sys.executable. WINDOWS python3 IS FAKE STORE STUB. NOT TRUST NAME.
     'tier1': ['{python}', '{ir_analyzer}', '{ll}', '--json'],
     # TIER-2: REAL LLVM PASS. WRAPPER RUN OPT WITH FalseSharingPass.so.
     'tier2': ['{python}', '{tier2_analyzer}', '{ll}', '--json'],
 }
 
 # ============================================================
-# PATH CONSTANTS. ALL ABSOLUTE. GROK HATE RELATIVE PATH.
+# PATH CONSTANTS. ALL ABSOLUTE. HATE RELATIVE PATH.
 # ============================================================
 THIS_DIR     = Path(__file__).parent.resolve()
 CORPUS_DIR   = THIS_DIR / 'corpus'
@@ -42,7 +42,7 @@ CACHE_LINE = 64
 
 
 def win_to_wsl(path):
-    # GROK CONVERT WINDOWS PATH TO WSL /mnt/ PATH.
+    # CONVERT WINDOWS PATH TO WSL /mnt/ PATH.
     # C:\foo\bar -> /mnt/c/foo/bar. ONLY CALLED ON WINDOWS HOST.
     p = str(path).replace('\\', '/')
     if len(p) >= 2 and p[1] == ':':
@@ -52,7 +52,7 @@ def win_to_wsl(path):
 
 
 def compile_to_ir(c_file, ll_file):
-    # GROK COMPILE .c TO .ll VIA CLANG.
+    # COMPILE .c TO .ll VIA CLANG.
     # DUAL MODE: WINDOWS HOST = WSL PREFIX. LINUX CI = CLANG DIRECT.
     # -O0 = ALL STORES SURVIVE. -g = SOURCE LINES IN DEBUG METADATA.
     # -std=c11 = _Atomic SUPPORT.
@@ -83,7 +83,7 @@ def compile_to_ir(c_file, ll_file):
 
 
 def run_analyzer(analyzer_cmd_template, ll_file):
-    # GROK RUN ANALYZER. PARSE JSON. RETURN (findings_list, error_str_or_None).
+    # RUN ANALYZER. PARSE JSON. RETURN (findings_list, error_str_or_None).
     # TEMPLATE SUBSTITUTION: {ir_analyzer} = tier1 script, {tier2_analyzer} = tier2 wrapper.
     cmd = []
     for tok in analyzer_cmd_template:
@@ -104,7 +104,7 @@ def run_analyzer(analyzer_cmd_template, ll_file):
 
 
 def finding_matches(finding, expected_entry):
-    # GROK CHECK: DOES ACTUAL FINDING MATCH EXPECTED ENTRY?
+    # CHECK: DOES ACTUAL FINDING MATCH EXPECTED ENTRY?
     # HEURISTIC MUST MATCH EXACTLY.
     # struct_contains (IF NOT EMPTY/NULL) MUST BE SUBSTRING OF finding['struct'].
     if finding['heuristic'] != expected_entry['heuristic']:
@@ -118,7 +118,7 @@ def finding_matches(finding, expected_entry):
 
 
 def evaluate_case(case_label, actual_findings):
-    # GROK EVALUATE ONE CASE. RETURN LIST OF VERDICTS.
+    # EVALUATE ONE CASE. RETURN LIST OF VERDICTS.
     # EACH VERDICT IS A DICT WITH keys: type, heuristic, struct_contains, finding.
     # type: PASS | MISS | GAP | FP | KNOWN-FP
     expected    = case_label['expected']         # LIST OF EXPECTED ENTRIES.
@@ -189,7 +189,7 @@ def evaluate_case(case_label, actual_findings):
 
 
 def compute_metrics(all_case_results):
-    # GROK COMPUTE PER-HEURISTIC TP/FP/FN/GAP/KNOWN_FP AND OVERALL METRICS.
+    # COMPUTE PER-HEURISTIC TP/FP/FN/GAP/KNOWN_FP AND OVERALL METRICS.
     # GAP VERDICTS NOT COUNTED AS FN (ALLOWED GAPS).
     # KNOWN-FP VERDICTS NOT COUNTED AS FP (KNOWN FALSE POSITIVES, ALLOWED).
     from collections import defaultdict
@@ -215,14 +215,14 @@ def compute_metrics(all_case_results):
 
 
 def precision_recall(tp, fp, fn):
-    # GROK COMPUTE PRECISION AND RECALL. HANDLE ZERO DIVISION.
+    # COMPUTE PRECISION AND RECALL. HANDLE ZERO DIVISION.
     prec = tp / (tp + fp) if (tp + fp) > 0 else float('nan')
     rec  = tp / (tp + fn) if (tp + fn) > 0 else float('nan')
     return prec, rec
 
 
 def format_score_table(metrics):
-    # GROK FORMAT MARKDOWN TABLE. HEURISTIC | TP | FP | FN | GAP | KNOWN-FP | PREC | RECALL
+    # FORMAT MARKDOWN TABLE. HEURISTIC | TP | FP | FN | GAP | KNOWN-FP | PREC | RECALL
     lines = []
     lines.append('| Heuristic | TP | FP | FN | GAP | KNOWN-FP | Precision | Recall |')
     lines.append('|-----------|----|----|----|----|----------|-----------|--------|')
@@ -255,7 +255,7 @@ def format_score_table(metrics):
 
 
 def format_case_detail(all_case_results):
-    # GROK FORMAT PER-CASE DETAIL TABLE FOR RESULTS FILE.
+    # FORMAT PER-CASE DETAIL TABLE FOR RESULTS FILE.
     # COLUMNS: CASE | EXPECTED | GOT | VERDICT
     # FOR FP/KNOWN-FP: EXPECTED=(none), GOT=ACTUAL FINDING. NOTHING WAS EXPECTED.
     # FOR MISS/GAP: EXPECTED=EXPECTED ENTRY, GOT=(none). FINDING ABSENT.
@@ -285,7 +285,7 @@ def format_case_detail(all_case_results):
 
 
 def get_ll_path(case):
-    # GROK DERIVE IR CACHE PATH FOR A CASE.
+    # DERIVE IR CACHE PATH FOR A CASE.
     # SUPPORTS BOTH FLAT (tp_h2.c) AND SUBDIR (basic/tp_h2.c) CORPUS LAYOUTS.
     # IR CACHE MIRRORS SUBDIR: corpus/ir/basic/tp_h2.ll
     rel = Path(case['file'])          # e.g. "basic/tp_h2_tid_array.c" or "tp_h2.c"
@@ -295,7 +295,7 @@ def get_ll_path(case):
 
 
 def main():
-    # GROK MAIN EVALUATION LOOP.
+    # MAIN EVALUATION LOOP.
     # 1. LOAD LABELS.
     # 2. COMPILE EACH .c TO .ll (CACHED). SUBDIR LAYOUT SUPPORTED.
     # 3. RUN EACH REGISTERED ANALYZER ON EACH .ll.
@@ -415,7 +415,7 @@ def main():
         if total_fp > 0 or total_fn > 0 or total_err > 0:
             exit_code = 1
 
-    # GROK DONE. HONEST RESULT. NO FUDGE.
+    # DONE. HONEST RESULT. NO FUDGE.
     if exit_code == 0:
         print('\nAll clear: no unexpected FP or FN. Gaps (known_limitation) and KNOWN-FP are allowed.')
     else:

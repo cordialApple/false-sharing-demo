@@ -1,5 +1,5 @@
 // EDGE FNPTR ENTRY
-// GROK LOAD FUNCTION POINTER INTO VARIABLE. PASS VARIABLE TO PTHREAD_CREATE.
+// LOAD FUNCTION POINTER INTO VARIABLE. PASS VARIABLE TO PTHREAD_CREATE.
 // SAME FALSE SHARING PATTERN AS tp_h2_tid_array (SMALL STRUCT, TID INDEX).
 // BUT ANALYZER CANNOT SEE THROUGH FUNCTION POINTER. THREAD ENTRY UNKNOWN.
 // EXPECTED: H2 on struct tiny_t  (known_limitation: true)
@@ -20,7 +20,7 @@ typedef struct {
 
 tiny_t *arr;  // GLOBAL POINTER TO SMALL STRUCT ARRAY.
 
-// GROK WORKER FUNCTION. SAME AS tp_h2. TID INDEX. SMALL STRUCT. FALSE SHARING.
+// WORKER FUNCTION. SAME AS tp_h2. TID INDEX. SMALL STRUCT. FALSE SHARING.
 void *worker(void *arg) {
     int tid = *(int *)arg;
     for (int i = 0; i < ITERS; i++) {
@@ -33,14 +33,14 @@ int main(void) {
     arr = malloc(sizeof(tiny_t) * NUM_THREADS);
     for (int i = 0; i < NUM_THREADS; i++) arr[i].value = 0;
 
-    // GROK LOAD FUNCTION POINTER INTO LOCAL VARIABLE. KEY: fn IS REGISTER IN IR.
+    // LOAD FUNCTION POINTER INTO LOCAL VARIABLE. KEY: fn IS REGISTER IN IR.
     void *(*fn)(void *) = worker;  // fn = ptr %fn_var. NOT ptr @worker LITERAL.
 
     pthread_t threads[NUM_THREADS];
     int tids[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; i++) {
         tids[i] = i;
-        // GROK PASS fn (REGISTER) NOT worker (LITERAL). ANALYZER CANNOT EXTRACT NAME.
+        // PASS fn (REGISTER) NOT worker (LITERAL). ANALYZER CANNOT EXTRACT NAME.
         pthread_create(&threads[i], NULL, fn, &tids[i]);
     }
     for (int i = 0; i < NUM_THREADS; i++) pthread_join(threads[i], NULL);

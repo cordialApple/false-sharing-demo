@@ -1,5 +1,5 @@
 // TP H3 ADJACENT ATOMICS
-// GROK MAKE STRUCT WITH TWO ATOMIC FIELDS. ADJACENT IN MEMORY. SAME LINE.
+// MAKE STRUCT WITH TWO ATOMIC FIELDS. ADJACENT IN MEMORY. SAME LINE.
 // THREAD A HAMMER atomic_a. THREAD B HAMMER atomic_b. SAME CACHE LINE. BAD.
 // ATOMIC NOT HELP WITH FALSE SHARING. ATOMIC PREVENT DATA RACE BUT NOT PING PONG.
 // EXPECTED: H3 on struct atomic_pair
@@ -19,7 +19,7 @@ struct atomic_pair {
 struct atomic_pair ap = {0, 0};  // SINGLE GLOBAL INSTANCE.
 
 void *thread_a(void *arg) {
-    // GROK ATOMICALLY INCREMENT a. CACHE LINE OWNED BY a BUT b ALSO THERE.
+    // ATOMICALLY INCREMENT a. CACHE LINE OWNED BY a BUT b ALSO THERE.
     struct atomic_pair *p = (struct atomic_pair *)arg;
     for (int i = 0; i < 1000000; i++) {
         atomic_fetch_add(&p->a, 1);
@@ -28,7 +28,7 @@ void *thread_a(void *arg) {
 }
 
 void *thread_b(void *arg) {
-    // GROK ATOMICALLY INCREMENT b. SHARE LINE WITH a. LINE BOUNCE BETWEEN CORES.
+    // ATOMICALLY INCREMENT b. SHARE LINE WITH a. LINE BOUNCE BETWEEN CORES.
     struct atomic_pair *p = (struct atomic_pair *)arg;
     for (int i = 0; i < 1000000; i++) {
         atomic_fetch_add(&p->b, 1);

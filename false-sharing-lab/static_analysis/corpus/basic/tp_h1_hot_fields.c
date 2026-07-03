@@ -1,5 +1,5 @@
 // TP H1 HOT FIELDS
-// GROK MAKE STRUCT WITH TWO HOT FIELDS. ONE STRUCT. TWO THREADS.
+// MAKE STRUCT WITH TWO HOT FIELDS. ONE STRUCT. TWO THREADS.
 // THREAD A WRITE FIELD a. THREAD B WRITE FIELD b.
 // BOTH FIELDS IN SAME 64-BYTE BUCKET (OFFSET 0 AND 8). SAME LINE. BAD.
 // NO ARRAY INDEXING. SINGLE STRUCT INSTANCE. H2 NOT FIRE. H1 MUST FIRE.
@@ -17,7 +17,7 @@ struct hot_fields {
 struct hot_fields g = {0, 0};  // SINGLE INSTANCE. GLOBAL. SHARED BY BOTH THREADS.
 
 void *thread_a(void *arg) {
-    // GROK THREAD A. ONLY WRITE FIELD a. NOT FIELD b.
+    // THREAD A. ONLY WRITE FIELD a. NOT FIELD b.
     struct hot_fields *p = (struct hot_fields *)arg;
     for (int i = 0; i < 1000000; i++) {
         p->a++;  // WRITE FIELD 0. ptr %p, i32 0, i32 0.
@@ -26,7 +26,7 @@ void *thread_a(void *arg) {
 }
 
 void *thread_b(void *arg) {
-    // GROK THREAD B. ONLY WRITE FIELD b. NOT FIELD a.
+    // THREAD B. ONLY WRITE FIELD b. NOT FIELD a.
     struct hot_fields *p = (struct hot_fields *)arg;
     for (int i = 0; i < 1000000; i++) {
         p->b++;  // WRITE FIELD 1. ptr %p, i32 0, i32 1. SAME LINE AS FIELD 0.

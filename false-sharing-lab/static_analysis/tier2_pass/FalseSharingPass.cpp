@@ -1,9 +1,9 @@
-// GROK BUILD REAL LLVM PASS. TIER 2. STRONGER THAN REGEX GROK.
-// GROK USE LLVM EYES: DataLayout KNOW TRUE OFFSET. USE-DEF CHAIN FOLLOW STORE.
-// GROK WALK CALL GRAPH FROM PTHREAD_CREATE. FIND THREAD LAND FUNCTION.
-// GROK SPIT JSON SAME SHAPE AS TIER 1. AGENT EAT SAME FOOD FROM BOTH TIER.
+// BUILD REAL LLVM PASS. TIER 2. STRONGER THAN REGEX TIER.
+// USE LLVM EYES: DataLayout KNOW TRUE OFFSET. USE-DEF CHAIN FOLLOW STORE.
+// WALK CALL GRAPH FROM PTHREAD_CREATE. FIND THREAD LAND FUNCTION.
+// SPIT JSON SAME SHAPE AS TIER 1. AGENT EAT SAME FOOD FROM BOTH TIER.
 //
-// LLVM 18 = OPAQUE POINTER. ptr EVERYWHERE. GROK GET STRUCT TYPE FROM
+// LLVM 18 = OPAQUE POINTER. ptr EVERYWHERE. GET STRUCT TYPE FROM
 // GEPOperator::getSourceElementType(). NOT FROM POINTER. POINTER KNOW NOTHING.
 
 #include "llvm/IR/Module.h"
@@ -36,7 +36,7 @@ static const uint64_t CACHE_LINE_BYTES = 64;
 namespace {
 
 // ------------------------------------------------------------------------
-// FINDING = ONE WARN GROK GIVE HUMAN. MIRROR TIER 1 JSON SHAPE EXACT.
+// FINDING = ONE WARN FOR HUMAN. MIRROR TIER 1 JSON SHAPE EXACT.
 // ------------------------------------------------------------------------
 struct Finding {
   std::string heuristic;         // "H1".."H5"
@@ -51,7 +51,7 @@ struct Finding {
   std::string fix;
 };
 
-// SEVERITY RANK. GROK SORT LOUD WARN FIRST. STABLE DIFF.
+// SEVERITY RANK. SORT LOUD WARN FIRST. STABLE DIFF.
 static int sevRank(const std::string &s) {
   if (s == "HIGH") return 0;
   if (s == "MEDIUM") return 1;
@@ -87,7 +87,7 @@ static std::string typeToString(Type *T) {
   return os.str();
 }
 
-// STRUCT TYPE NAME OUT. LLVM SAY "struct.foo". GROK PREPEND % LIKE TIER 1.
+// STRUCT TYPE NAME OUT. LLVM SAY "struct.foo". PREPEND % LIKE TIER 1.
 static std::string structKey(StructType *ST) {
   if (ST->hasName())
     return ("%" + ST->getName()).str();
@@ -95,7 +95,7 @@ static std::string structKey(StructType *ST) {
 }
 
 // ------------------------------------------------------------------------
-// GEP GROK. PULL OUT WHAT MATTER FOR FALSE SHARING FROM ONE GEP.
+// GEP DECODE. PULL OUT WHAT MATTER FOR FALSE SHARING FROM ONE GEP.
 //   - structTy: SOURCE ELEMENT STRUCT (nullptr IF SOURCE NOT STRUCT).
 //   - variableArrayIndex: FIRST INDEX NOT CONSTANT -> ARRAY INDEX BY VARIABLE.
 //       -O0 SEPARATE:  gep %struct.X, ptr %p, i64 %var            (1 index)
@@ -141,11 +141,11 @@ static GepInfo analyzeGep(GEPOperator *G) {
   // OPERAND 2 = SLOT INDEX INTO ARRAY DIMENSION. NON-CONST = THREAD-ID WALK.
   // THE lshaz TrackingStatistic PATTERN. GLOBAL ARRAY OF SMALL STAT STRUCT.
   // ELEMENT MUST BE STRUCT. SCALAR ARRAY ([8 x i64]) NOT H2 BUSINESS --
-  // THAT IS THE LABELED H6 GAP. GROK NOT FIRE THERE.
+  // THAT IS THE LABELED H6 GAP. NOT FIRE THERE.
   if (auto *AT = dyn_cast<ArrayType>(srcTy)) {
     auto *ST = dyn_cast<StructType>(AT->getElementType());
     if (!ST)
-      return info; // ARRAY OF SCALAR. GROK WALK AWAY.
+      return info; // ARRAY OF SCALAR. WALK AWAY.
     info.structTy = ST;
     if (G->getNumOperands() >= 3 && !isa<ConstantInt>(G->getOperand(2)))
       info.variableArrayIndex = true;
@@ -154,13 +154,13 @@ static GepInfo analyzeGep(GEPOperator *G) {
     return info;
   }
 
-  return info; // NOT STRUCT, NOT ARRAY-OF-STRUCT. GROK NOT CARE.
+  return info; // NOT STRUCT, NOT ARRAY-OF-STRUCT. NOT CARE.
 }
 
 // GET STRUCT FIELD FROM A MEMORY POINTER (STORE / ATOMIC TARGET).
 // TWO PATH. PRECISE PATH FIRST. FALLBACK PATH IF PRECISE FAIL.
 //
-// PATH 1 (PRECISE, OFFSET-BASED): GROK WALK BACK THROUGH CONSTANT OFFSET
+// PATH 1 (PRECISE, OFFSET-BASED): WALK BACK THROUGH CONSTANT OFFSET
 // (GEP INSTR, CONSTEXPR GEP, OR NONE) TO A BASE OBJECT. IF BASE IS
 // STRUCT-TYPED GLOBAL OR ALLOCA, MAP BYTE OFFSET TO FIELD WITH EXACT
 // StructLayout. CATCH BARE-POINTER FIELD 0 ACCESS (NO GEP AT ALL).
@@ -169,8 +169,8 @@ static GepInfo analyzeGep(GEPOperator *G) {
 // STRUCT POINTER ARRIVE THROUGH OPAQUE void* THREAD ARG. p = (struct X*)arg;
 // p->a++. BASE IS FUNCTION ARGUMENT. NOT GLOBAL. NOT ALLOCA. PATH 1 BLIND.
 // BUT THE GEP ITSELF STILL SAY WHICH STRUCT: getSourceElementType() IS
-// StructType, TRAILING CONSTANT INDEX IS FIELD. GROK TRUST THE GEP TYPE.
-// BARE ARG POINTER WITH NO GEP AND NO TYPE HINT: GROK NOT GUESS. DROP IT.
+// StructType, TRAILING CONSTANT INDEX IS FIELD. TRUST THE GEP TYPE.
+// BARE ARG POINTER WITH NO GEP AND NO TYPE HINT: NOT GUESS. DROP IT.
 static bool getStructField(const DataLayout &DL, Value *ptr, StructType *&st,
                            unsigned &fieldIdx) {
   // PATH 1: OFFSET MATH FROM RESOLVABLE BASE OBJECT. MOST PRECISE.
@@ -205,12 +205,12 @@ static bool getStructField(const DataLayout &DL, Value *ptr, StructType *&st,
       return true;
     }
   }
-  return false; // NO BASE, NO TYPED GEP. GROK NOT GUESS.
+  return false; // NO BASE, NO TYPED GEP. NOT GUESS.
 }
 
 // ========================================================================
 // STEP 1 -- THREAD REACHABILITY.
-// GROK FIND PTHREAD_CREATE. TAKE ARG #2 (0-BASED THIRD PARAM). STRIP CAST.
+// FIND PTHREAD_CREATE. TAKE ARG #2 (0-BASED THIRD PARAM). STRIP CAST.
 // THAT FUNCTION IS THREAD ENTRY. THEN WALK CALL GRAPH. EVERY DIRECT CALLEE
 // ALSO THREAD LAND.
 // ========================================================================
@@ -331,7 +331,7 @@ static void runH2(FSContext &Ctx) {
 
 // ========================================================================
 // HEURISTIC H1 (MEDIUM) -- TWO FIELD SAME 64B BUCKET, BOTH STORED IN THREAD.
-// GROK USE EXACT StructLayout OFFSET. NOT GUESS.
+// USE EXACT StructLayout OFFSET. NOT GUESS.
 // H2-BEATS-H1 SUPPRESSION LIVE IN applySuppression. NOT HERE.
 // ========================================================================
 static void runH1(FSContext &Ctx) {
@@ -538,7 +538,7 @@ static void runH4(FSContext &Ctx) {
       continue; // NICE MULTIPLE. NO STRADDLE.
     uint64_t align = Ctx.DL.getABITypeAlign(st).value();
     if (align >= CACHE_LINE_BYTES)
-      continue; // ALREADY LINE ALIGNED. GROK CONTENT.
+      continue; // ALREADY LINE ALIGNED. FINE.
 
     Finding f;
     f.heuristic = "H4";
@@ -789,7 +789,7 @@ struct FalseSharingPass : PassInfoMixin<FalseSharingPass> {
     applySuppression(Ctx);
 
     emitJson(Ctx);
-    return PreservedAnalyses::all(); // GROK LOOK ONLY. GROK TOUCH NOTHING.
+    return PreservedAnalyses::all(); // LOOK ONLY. TOUCH NOTHING.
   }
 
   // ALWAYS RUN EVEN IF FUNCTION MARKED optnone ETC.

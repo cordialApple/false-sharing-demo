@@ -1,5 +1,5 @@
 // TN H2 ALIGNED ATTR
-// GROK USE __attribute__((aligned(64))) INSTEAD OF MANUAL PADDING.
+// USE __attribute__((aligned(64))) INSTEAD OF MANUAL PADDING.
 // COMPILER HANDLE PADDING. SAME EFFECT AS tn_h2_padded_array. STRUCT SIZE = 64.
 // EXPECTED: CLEAN (no findings)
 // WHY: aligned(64) FORCES sizeof TO BE MULTIPLE OF 64.
@@ -12,7 +12,7 @@
 #define NUM_THREADS 4
 #define ITERS 1000000
 
-// GROK USE ATTRIBUTE. COMPILER ADD PADDING. SIZE BECOME 64.
+// USE ATTRIBUTE. COMPILER ADD PADDING. SIZE BECOME 64.
 typedef struct {
     long value;
 } __attribute__((aligned(64))) aligned_counter_t;

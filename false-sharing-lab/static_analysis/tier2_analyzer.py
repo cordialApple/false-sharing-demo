@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# GROK TIER 2 WRAPPER. SAME CLI AS TIER 1 ir_analyzer.py.
-# GROK NOT PARSE IR HERE. GROK CALL REAL LLVM PASS. PASS DO HARD WORK.
+# TIER 2 WRAPPER. SAME CLI AS TIER 1 ir_analyzer.py.
+# NOT PARSE IR HERE. CALL REAL LLVM PASS. PASS DO HARD WORK.
 # DUAL MODE: WINDOWS HOST -> WSL + PATH TRANSLATE. LINUX CI -> opt DIRECT.
 #
 # CONTRACT (MATCH TIER 1 EXACT):
@@ -21,13 +21,13 @@ CACHE_LINE_BYTES = 64
 # WHERE PLUGIN LIVE. RELATIVE TO THIS SCRIPT. build.sh MAKE IT.
 PLUGIN_REL = Path("tier2_pass") / "build" / "FalseSharingPass.so"
 
-# GROK TRY THESE opt BINARY IN ORDER. apt ALTERNATIVES VARY BY MACHINE.
+# TRY THESE opt BINARY IN ORDER. apt ALTERNATIVES VARY BY MACHINE.
 OPT_CANDIDATES = ["opt-18", "/usr/lib/llvm-18/bin/opt", "opt"]
 
 
 def win_to_wsl(path: Path) -> str:
     """Convert an absolute Windows path (C:\\a\\b) to a WSL path (/mnt/c/a/b)."""
-    # GROK TURN WINDOWS PATH INTO WSL /mnt PATH. DRIVE LETTER GO LOWER CASE.
+    # TURN WINDOWS PATH INTO WSL /mnt PATH. DRIVE LETTER GO LOWER CASE.
     abspath = Path(path).resolve()
     win = PureWindowsPath(abspath)
     drive = win.drive.rstrip(":").lower()   # "C:" -> "c"
@@ -63,7 +63,7 @@ def find_opt() -> str:
                 if r.returncode == 0 and r.stdout.strip():
                     return cand
             except FileNotFoundError:
-                # WSL ITSELF MISSING. GROK CANNOT WORK. TELL HUMAN LOUD.
+                # WSL ITSELF MISSING. CANNOT WORK. TELL HUMAN LOUD.
                 print("ERROR: 'wsl' not found. Tier 2 needs WSL Ubuntu with LLVM 18.",
                       file=sys.stderr)
                 sys.exit(2)
@@ -72,7 +72,7 @@ def find_opt() -> str:
 
 def run_pass(ll_path: Path) -> dict:
     """Run the FalseSharingPass on ll_path; return parsed JSON dict."""
-    # GROK CHECK PLUGIN EXIST FIRST. NO PLUGIN = NO ANALYSIS. TELL HUMAN HOW BUILD.
+    # CHECK PLUGIN EXIST FIRST. NO PLUGIN = NO ANALYSIS. TELL HUMAN HOW BUILD.
     script_dir = Path(__file__).resolve().parent
     plugin_path = script_dir / PLUGIN_REL
 
@@ -107,8 +107,8 @@ def run_pass(ll_path: Path) -> dict:
         # WINDOWS HOST. TRANSLATE PATHS TO WSL /mnt FORM. RUN VIA WSL.
         plugin_wsl = win_to_wsl(plugin_path)
         ll_wsl     = win_to_wsl(ll_path)
-        # GROK BUILD opt COMMAND. -disable-output SO opt NOT PRINT MODULE.
-        # PASS PRINT JSON TO STDOUT. GROK CATCH STDOUT.
+        # BUILD opt COMMAND. -disable-output SO opt NOT PRINT MODULE.
+        # PASS PRINT JSON TO STDOUT. CATCH STDOUT.
         cmd = (
             f"{opt_bin} -load-pass-plugin='{plugin_wsl}' "
             f"-passes=false-sharing -disable-output '{ll_wsl}'"
@@ -123,7 +123,7 @@ def run_pass(ll_path: Path) -> dict:
         print(proc.stderr, file=sys.stderr)
         sys.exit(proc.returncode or 1)
 
-    # GROK PARSE STDOUT AS JSON. IF opt PRINT EXTRA NOISE, DECODE FROM FIRST '{'.
+    # PARSE STDOUT AS JSON. IF opt PRINT EXTRA NOISE, DECODE FROM FIRST '{'.
     # raw_decode STOP AT BALANCED END OF OBJECT. GREEDY REGEX GRABBED TRAILING
     # NOISE BRACES AND SECOND PARSE CRASHED UNCAUGHT. REVIEW CAUGHT IT.
     out = proc.stdout.strip()
@@ -145,7 +145,7 @@ def run_pass(ll_path: Path) -> dict:
 
 def format_human(data: dict, ll_path: Path) -> str:
     """Render pass JSON as a human-readable report (mirrors Tier-1 layout)."""
-    # GROK TALK TO HUMAN. SAME SHAPE REPORT AS TIER 1 SO HUMAN NOT CONFUSED.
+    # TALK TO HUMAN. SAME SHAPE REPORT AS TIER 1 SO HUMAN NOT CONFUSED.
     struct_layouts = data.get("struct_layouts", {})
     findings = data.get("findings", [])
     thread_reachable = data.get("thread_reachable", [])
@@ -189,7 +189,7 @@ def format_human(data: dict, ll_path: Path) -> str:
 
     # FINDINGS. PASS ALREADY SORT BY SEVERITY THEN STRUCT.
     if not findings:
-        lines.append("NO FINDINGS. ALL CLEAR. GROK HAPPY.")
+        lines.append("NO FINDINGS. ALL CLEAR.")
     else:
         lines.append(f"FINDINGS ({len(findings)} total):")
         lines.append("")
@@ -235,14 +235,14 @@ def main():
         print(f"ERROR: File not found: {ll_path}", file=sys.stderr)
         sys.exit(1)
 
-    # GROK RUN THE REAL PASS. THIS IS THE MAIN EVENT.
+    # RUN THE REAL PASS. THIS IS THE MAIN EVENT.
     data = run_pass(ll_path)
 
     if args.json:
         # RAW JSON FOR AGENT / evaluate.py. MACHINE READ.
         print(json.dumps(data, indent=2))
     else:
-        # HUMAN READABLE. GROK TALK TO HUMAN.
+        # HUMAN READABLE. TALK TO HUMAN.
         print(format_human(data, ll_path))
 
 

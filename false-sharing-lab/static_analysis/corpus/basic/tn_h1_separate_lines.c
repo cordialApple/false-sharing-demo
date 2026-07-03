@@ -1,5 +1,5 @@
 // TN H1 SEPARATE LINES
-// GROK FIX HOT FIELDS WITH PADDING. SAME TWO-THREAD PATTERN AS tp_h1.
+// FIX HOT FIELDS WITH PADDING. SAME TWO-THREAD PATTERN AS tp_h1.
 // BUT FIELD a AND FIELD b NOW ON DIFFERENT CACHE LINES.
 // THREAD A WRITE FIELD a (OFFSET 0, BUCKET 0).
 // THREAD B WRITE FIELD b (OFFSET 64, BUCKET 1). DIFFERENT BUCKET. NO H1.
@@ -18,7 +18,7 @@ struct separated_hot {
 struct separated_hot g = {0};  // SINGLE GLOBAL INSTANCE.
 
 void *thread_a(void *arg) {
-    // GROK WRITE FIELD 0 (a). BUCKET 0. ONLY ONE WRITER IN THIS BUCKET.
+    // WRITE FIELD 0 (a). BUCKET 0. ONLY ONE WRITER IN THIS BUCKET.
     struct separated_hot *p = (struct separated_hot *)arg;
     for (int i = 0; i < 1000000; i++) {
         p->a++;  // GEP i32 0, i32 0. OFFSET 0. BUCKET 0.
@@ -27,7 +27,7 @@ void *thread_a(void *arg) {
 }
 
 void *thread_b(void *arg) {
-    // GROK WRITE FIELD 2 (b). BUCKET 1. ONLY ONE WRITER IN THIS BUCKET TOO.
+    // WRITE FIELD 2 (b). BUCKET 1. ONLY ONE WRITER IN THIS BUCKET TOO.
     struct separated_hot *p = (struct separated_hot *)arg;
     for (int i = 0; i < 1000000; i++) {
         p->b++;  // GEP i32 0, i32 2. OFFSET 64. BUCKET 1. DIFFERENT LINE!

@@ -19,7 +19,7 @@ Thumbs.db
 
 .vscode/
 .idea/
-# STATIC ANALYSIS GENERATED STUFF. GROK NOT COMMIT BUILD GOO.
+# STATIC ANALYSIS GENERATED STUFF. NOT COMMIT BUILD GOO.
 false-sharing-lab/static_analysis/tier2_pass/build/
 false-sharing-lab/static_analysis/ir/
 false-sharing-lab/static_analysis/corpus/ir/

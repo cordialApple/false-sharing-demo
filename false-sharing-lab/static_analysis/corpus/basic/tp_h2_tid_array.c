@@ -1,5 +1,5 @@
 // TP H2 TID ARRAY
-// GROK MAKE CLASSIC TRAP. MANY THREAD. ONE WORKER FUNCTION.
+// MAKE CLASSIC TRAP. MANY THREAD. ONE WORKER FUNCTION.
 // EACH THREAD WRITE counters[tid].value. TID IS THREAD ID.
 // STRUCT TINY (8 BYTES). MANY ELEMENT FIT SAME CACHE LINE.
 // 64 / 8 = 8 ELEMENT PER LINE. THREAD 0 AND THREAD 1 SHARE LINE. VERY BAD.
@@ -13,13 +13,13 @@
 #define ITERS 1000000
 
 typedef struct {
-    long value;          // GROK ONLY FIELD. 8 BYTES. STRUCT TOO SMALL.
+    long value;          // ONLY FIELD. 8 BYTES. STRUCT TOO SMALL.
 } tid_counter_t;
 
 tid_counter_t *counters;  // GLOBAL POINTER. THREAD LOAD THEN INDEX WITH TID.
 
 void *worker(void *arg) {
-    // GROK: TID FROM ARG. USED AS ARRAY INDEX. VARIABLE INDEX. BAD.
+    // TID FROM ARG. USED AS ARRAY INDEX. VARIABLE INDEX. BAD.
     int tid = *(int *)arg;
     for (int i = 0; i < ITERS; i++) {
         counters[tid].value++;  // DIFFERENT TID, SAME CACHE LINE. PING PONG.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# GROK ANALYSIS AGENT. MIRROR AGENT.PY SHAPE. SAME PATTERN. DIFFERENT TASK.
+# ANALYSIS AGENT. MIRROR AGENT.PY SHAPE. SAME PATTERN. DIFFERENT TASK.
 # AGENT EMIT IR. AGENT ANALYZE IR. AGENT WRITE REPORT. SIMPLE LIFE.
-# LANGCHAIN TOOL EACH DO ONE THING. REACT AGENT DECIDE ORDER. GROK WATCH.
+# LANGCHAIN TOOL EACH DO ONE THING. REACT AGENT DECIDE ORDER.
 
 import os
 import subprocess
@@ -9,18 +9,18 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# GROK LOAD SECRETS. API KEY LIVE IN AGENT DIR. LOOK THERE FIRST.
+# LOAD SECRETS. API KEY LIVE IN AGENT DIR. LOOK THERE FIRST.
 # USE ABSOLUTE PATH SO SCRIPT WORK FROM ANY DIRECTORY.
 _agent_env = Path(__file__).parent.parent / "agent" / ".env"
 load_dotenv(dotenv_path=str(_agent_env))
 
-# LANGCHAIN AND ANTHROPIC IMPORT AFTER DOTENV. ORDER MATTERS. GROK CAREFUL.
+# LANGCHAIN AND ANTHROPIC IMPORT AFTER DOTENV. ORDER MATTERS.
 from langchain_core.tools import tool
 from langchain_anthropic import ChatAnthropic
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
 
-# PATH CONSTANTS. ALL RELATIVE TO THIS FILE LOCATION. GROK USE ABSOLUTE.
+# PATH CONSTANTS. ALL RELATIVE TO THIS FILE LOCATION. USE ABSOLUTE.
 _THIS_DIR = Path(__file__).parent.resolve()
 _STATIC_ANALYSIS_DIR = _THIS_DIR
 _IR_DIR = _THIS_DIR / "ir"
@@ -31,9 +31,9 @@ _REPORT_FILE = _REPORT_DIR / "static_analysis.md"
 
 def _run_wsl(cmd, cwd=None):
     """Helper: run a shell command via WSL on Windows, or natively on Linux."""
-    # GROK CHECK OS. WINDOWS NEED WSL WRAPPER. LINUX RUN DIRECT.
+    # CHECK OS. WINDOWS NEED WSL WRAPPER. LINUX RUN DIRECT.
     if os.name == 'nt':
-        # WINDOWS. GROK IN WINDOWS PRISON. USE WSL TO ESCAPE.
+        # WINDOWS. USE WSL TO ESCAPE.
         # CONVERT WINDOWS PATH TO WSL PATH FOR CWD.
         if cwd:
             # ANY DRIVE LETTER, NOT JUST C:. REVIEW FOUND D: REPO BREAK HERE.
@@ -65,11 +65,11 @@ def emit_ir() -> str:
     The IR files are written to static_analysis/ir/.
     Returns a status message indicating success or the error output.
     """
-    # GROK RUN MAKE. CLANG TURN C INTO LLVM WORDS. IR READY FOR ANALYSIS.
+    # RUN MAKE. CLANG TURN C INTO LLVM WORDS. IR READY FOR ANALYSIS.
     print("Tool: emit_ir() — running 'make ir' via WSL clang...")
     result = _run_wsl("make ir", cwd=_STATIC_ANALYSIS_DIR)
     if result.returncode != 0:
-        # MAKE FAIL. GROK SAD. RETURN ERROR SO AGENT CAN READ.
+        # MAKE FAIL. RETURN ERROR SO AGENT CAN READ.
         return (
             f"emit_ir FAILED (exit {result.returncode}).\n"
             f"stdout: {result.stdout}\n"
@@ -90,7 +90,7 @@ def analyze_ir(ll_filename: str = "false_sharing.ll") -> str:
     The ll_filename should be a basename like 'false_sharing.ll' (no path prefix).
     Returns JSON-encoded analysis results including struct layouts and false-sharing findings.
     """
-    # GROK RUN ANALYZER. PYTHON SCRIPT SCAN IR. FIND BAD STRUCT. RETURN JSON.
+    # RUN ANALYZER. PYTHON SCRIPT SCAN IR. FIND BAD STRUCT. RETURN JSON.
     print(f"Tool: analyze_ir('{ll_filename}') — running ir_analyzer.py...")
     ll_path = _IR_DIR / ll_filename
     if not ll_path.exists():
@@ -104,7 +104,7 @@ def analyze_ir(ll_filename: str = "false_sharing.ll") -> str:
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        # ANALYZER CRASH. GROK WORRIED. RETURN ERROR.
+        # ANALYZER CRASH. RETURN ERROR.
         return (
             f"ir_analyzer.py FAILED (exit {result.returncode}).\n"
             f"stderr: {result.stderr}"
@@ -119,7 +119,7 @@ def write_report(content: str) -> str:
     Use this to save the final analysis report comparing static predictions
     against the dynamic benchmark results.
     """
-    # GROK WRITE REPORT. HUMAN WILL READ LATER. MAKE IT GOOD.
+    # WRITE REPORT. HUMAN WILL READ LATER. MAKE IT GOOD.
     print("Tool: write_report() — writing static_analysis.md...")
     _REPORT_DIR.mkdir(parents=True, exist_ok=True)
     with open(_REPORT_FILE, 'w', encoding='utf-8') as f:
@@ -128,7 +128,7 @@ def write_report(content: str) -> str:
 
 
 def main():
-    # GROK READ BENCHMARK RESULTS SO AGENT CAN COMPARE.
+    # READ BENCHMARK RESULTS SO AGENT CAN COMPARE.
     # DYNAMIC RESULTS ALREADY EXIST. AGENT COMPARE STATIC PREDICTION VS DYNAMIC TRUTH.
     sample_csv = ""
     if _RESULTS_CSV.exists():
@@ -137,7 +137,7 @@ def main():
         # NO SAMPLE RESULTS. AGENT WORK WITH WHAT IT KNOWS.
         sample_csv = "(sample_benchmark_results.csv not found)"
 
-    # BUILD LANGCHAIN REACT AGENT. SAME PATTERN AS AGENT.PY. GROK CONSISTENT.
+    # BUILD LANGCHAIN REACT AGENT. SAME PATTERN AS AGENT.PY. CONSISTENT.
     # CLAUDE SONNET SMART ENOUGH FOR THIS TASK. STRONG MODEL. GOOD REASONER.
     model = ChatAnthropic(model="claude-sonnet-4-20250514")
     tools = [emit_ir, analyze_ir, write_report]
