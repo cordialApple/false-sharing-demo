@@ -258,85 +258,247 @@ def build_call_closure(start_fns, all_functions):
     return reachable
 
 
+# SCALAR LLVM TYPES FOR H6. ARRAY ELEMENT WITH NO STRUCT ANYWHERE.
+# DERIVED FROM BASE_TYPE_SIZES SO THE TWO LISTS CANNOT DRIFT. ptr EXCLUDED:
+# POINTER TABLES ARE A DIFFERENT BEAST. LONGEST-FIRST SO i128 BEATS i12+8.
+SCALAR_TYPES_RE = '(?:' + '|'.join(
+    sorted((t for t in BASE_TYPE_SIZES if t != 'ptr'), key=len, reverse=True)
+) + ')'
+
+
 def find_gep_accesses(fn_lines):
     """
     Scan function lines for GEP instructions relevant to false-sharing detection.
 
     Returns:
-      variable_index_geps: list of struct names accessed with variable i64 index (H2 signal)
-      field_stores:        list of (struct_name, field_idx) pairs for fields written (H1 signal)
+      variable_index_geps: struct names var-indexed AND written through (H2/H4 signal)
+      field_stores:        (struct_name, field_idx) written, non-private base (H1 signal)
+      scalar_writes:       (elem_type, base_token) var-indexed scalar stores (H6 signal)
     """
-    # LOOK FOR TWO GEP PATTERNS:
+    # GEP SHAPES HUNTED HERE:
     #
-    # PATTERN 1 (H2 SIGNAL): ARRAY-OF-STRUCT INDEXING. VARIABLE INDEX.
-    #   %reg = getelementptr inbounds %struct.X, ptr %base, i64 %var_idx
-    #   THE %var_idx MEANS DYNAMIC INDEX. DIFFERENT THREAD USE DIFFERENT INDEX.
-    #   IF STRUCT SMALL, ELEMENTS PACK SAME CACHE LINE. VERY BAD.
+    # H2 SHAPE 1 (MALLOC POINTER): gep %struct.X, ptr %base, i64 %var
+    # H2 SHAPE 2 (FIXED ARRAY):    gep [4 x %struct.X], ptr @g, i64 0, i64 %var
+    # H1 (FIELD ACCESS):           gep %struct.X, ptr %base, i32 0, i32 N
+    # H6 SHAPE 1 (RAW POINTER):    gep i32, ptr %base, i64 %var
+    # H6 SHAPE 2 (FIXED ARRAY):    gep [8 x i64], ptr @g, i64 0, i64 %var
     #
-    # PATTERN 2 (H1 SIGNAL): FIELD ACCESS. CONSTANT INDEX.
-    #   %reg = getelementptr inbounds %struct.X, ptr %base, i32 0, i32 N
-    #   INDEX N IS FIELD NUMBER. IF TWO FIELD IN SAME 64B BUCKET, H1 FIRE.
+    # HURON ROUND LESSON: FIRING ON THE GEP ALONE OVER-WARNS. READ-ONLY
+    # SHARING IS FREE. EVERY VAR-INDEX SIGNAL NOW REQUIRES A STORE THROUGH
+    # THE GEP CHAIN (DIRECT, VIA FIELD GEP, OR VIA POINTER SAVED TO A LOCAL
+    # SLOT AND RELOADED).
 
-    # H2: VARIABLE INDEX GEP. i64 %reg (NOT CONSTANT NUMBER).
     var_idx_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%\w+,\s*i64\s+%(\w+)'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+([%@][\w.]+),\s*i64\s+%(\w+)'
     )
-
-    # H2 SHAPE 2: GLOBAL/STACK FIXED ARRAY OF STRUCTS. GEP SOURCE TYPE IS ARRAY.
-    #   %reg = getelementptr inbounds [4 x %struct.X], ptr @g, i64 0, i64 %var
-    # CORPUS CASE adv_tp_stats_array TAUGHT THIS SHAPE. LSHAZ FOUND SAME
-    # PATTERN IN LLVM TrackingStatistic. ELEMENT MUST BE STRUCT — SCALAR ARRAY
-    # ([8 x i64]) IS H6 TERRITORY, NOT H2. BASE CAN BE @GLOBAL OR %REG.
     array_var_idx_gep_re = re.compile(
         r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+(%struct\.[\w.]+)\],'
-        r'\s*ptr\s+[@%][\w.]+,\s*i64\s+0,\s*i64\s+%(\w+)'
+        r'\s*ptr\s+([%@][\w.]+),\s*i64\s+0,\s*i64\s+%(\w+)'
     )
-
-    # H1: FIELD ACCESS GEP. i32 0, i32 FIELD_IDX (CONSTANT FIELD INDEX).
     field_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%\w+,\s*i32\s+0,\s*i32\s+(\d+)'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%(\w+),\s*i32\s+0,\s*i32\s+(\d+)'
+    )
+    scalar_var_gep_re = re.compile(
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(' + SCALAR_TYPES_RE + r'),'
+        r'\s*ptr\s+([%@][\w.]+),\s*i64\s+%\w+'
+    )
+    scalar_array_gep_re = re.compile(
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+(' + SCALAR_TYPES_RE + r')\],'
+        r'\s*ptr\s+([%@][\w.]+),\s*i64\s+0,\s*i64\s+%\w+'
     )
 
-    # STORE INSTRUCTION. FIND WRITE TO MEMORY.
-    # store TYPE VALUE, ptr %TARGET
+    # STORE / LOAD / ALLOC BOOKKEEPING.
     # OPTIONAL volatile TOKEN. CLANG EMIT 'store volatile i64 ...' FOR VOLATILE FIELD.
-    # REVIEW FOUND THESE MISSED. VOLATILE FIELD IS EXACTLY THE HOT KIND. MUST SEE.
-    store_re = re.compile(r'\bstore\b\s+(?:volatile\s+)?\S+\s+\S+,\s*ptr\s+%(\w+)')
+    # 'store atomic' IS A LEGAL PREFIX TOO (C11 atomic_store). REVIEW CAUGHT IT.
+    store_re = re.compile(r'\bstore\b\s+(?:atomic\s+)?(?:volatile\s+)?\S+\s+\S+,\s*ptr\s+%(\w+)')
+    # ATOMIC RMW WRITES COUNT FOR THE H2/H6 WRITE REQUIREMENT (stats_array
+    # TAUGHT THIS: atomicrmw IS THE ONLY WRITE THERE). BUT NOT FOR H1 --
+    # ATOMIC FIELDS BELONG TO H3, SAME SPLIT AS TIER 2.
+    atomic_re = re.compile(
+        r'\b(?:atomicrmw\s+(?:volatile\s+)?\w+|cmpxchg(?:\s+weak)?(?:\s+volatile)?)\s+ptr\s+%(\w+)'
+    )
+    # llvm.memset/memcpy/memmove DEST IS A WRITE TOO. memset(&arr[tid],0,n)
+    # HAS NO store INSTRUCTION AT ALL.
+    mem_intr_re = re.compile(
+        r'@llvm\.mem(?:set|cpy|move)[\w.]*\(\s*ptr\s+(?:align\s+\d+\s+)?%(\w+)'
+    )
+    any_gep_re = re.compile(r'%(\w+)\s*=\s*getelementptr\b')
+    ptr_store_re = re.compile(r'\bstore\b\s+(?:volatile\s+)?ptr\s+(%\w+|@[\w.]+),\s*ptr\s+([%@][\w.]+)')
+    ptr_load_re = re.compile(r'%(\w+)\s*=\s*load\s+ptr,\s*ptr\s+([%@][\w.]+)')
+    malloc_re = re.compile(r'%(\w+)\s*=\s*call\s+[^@]*ptr\s+@(?:malloc|calloc|aligned_alloc|realloc)\s*\(')
+    ret_ptr_re = re.compile(r'\bret\s+ptr\s+%(\w+)')
 
-    variable_index_geps = []   # struct names from H2-pattern GEPs
-    field_gep_map = {}         # result_reg -> (struct_name, field_idx)
-    stored_registers = set()   # registers that got stored to
+    var_geps = {}       # result_reg -> (struct_name, base_token)
+    field_gep_map = {}  # result_reg -> (struct_name, field_idx, base_reg)
+    scalar_geps = {}    # result_reg -> (elem_type, base_token)
+    all_gep_regs = set()
+    stored_registers = set()
+    atomic_targets = set()
+    mem_targets = set()
+    ptr_stores = []     # (value_token, target_token)
+    ptr_loads = []      # (result_reg, slot_token)
+    malloc_regs = set()
+    ret_regs = set()
+    pthread_lines = []
 
     for line in fn_lines:
-        # CHECK VARIABLE-INDEX GEP. H2 SIGNAL. BOTH SHAPES.
+        mG = any_gep_re.search(line)
+        if mG:
+            all_gep_regs.add(mG.group(1))
         m = var_idx_gep_re.search(line) or array_var_idx_gep_re.search(line)
         if m:
-            struct_name = m.group(2)
-            variable_index_geps.append(struct_name)
-            continue  # SKIP FURTHER CHECKS ON THIS LINE. ONE GEP PER LINE IN IR.
-
-        # CHECK FIELD-ACCESS GEP. H1 SIGNAL.
+            var_geps[m.group(1)] = (m.group(2), m.group(3))
+            continue
         m2 = field_gep_re.search(line)
         if m2:
-            result_reg = m2.group(1)
-            struct_name = m2.group(2)
-            field_idx = int(m2.group(3))
-            field_gep_map[result_reg] = (struct_name, field_idx)
+            field_gep_map[m2.group(1)] = (m2.group(2), int(m2.group(4)), m2.group(3))
             continue
-
-        # CHECK STORE. MARK WRITTEN REGISTERS.
+        m6 = scalar_var_gep_re.search(line) or scalar_array_gep_re.search(line)
+        if m6:
+            scalar_geps[m6.group(1)] = (m6.group(2), m6.group(3))
+            continue
+        if mG:
+            continue
+        if '@pthread_create' in line:
+            pthread_lines.append(line)
+        mI = mem_intr_re.search(line)
+        if mI:
+            mem_targets.add(mI.group(1))
+            continue
+        mM = malloc_re.search(line)
+        if mM:
+            malloc_regs.add(mM.group(1))
+            continue
+        mR = ret_ptr_re.search(line)
+        if mR:
+            ret_regs.add(mR.group(1))
+        mP = ptr_store_re.search(line)
+        if mP:
+            ptr_stores.append((mP.group(1), mP.group(2)))
         m3 = store_re.search(line)
         if m3:
             stored_registers.add(m3.group(1))
+        mA = atomic_re.search(line)
+        if mA:
+            atomic_targets.add(mA.group(1))
+        mL = ptr_load_re.search(line)
+        if mL:
+            ptr_loads.append((mL.group(1), mL.group(2)))
 
-    # FIND FIELDS THAT GOT STORED TO. CROSS FIELD GEP MAP WITH STORED REGISTERS.
-    # IF FIELD GEP RESULT REGISTER APPEARS AS STORE TARGET, THAT FIELD IS WRITTEN.
-    field_stores = []
-    for reg, (struct_name, field_idx) in field_gep_map.items():
-        if reg in stored_registers:
-            field_stores.append((struct_name, field_idx))
+    # ANY GEP RESULT COUNTS FOR SLOT LEGALITY, NOT JUST THE TRACKED SHAPES.
+    # REVIEW CAUGHT: store INTO AN UNTRACKED GEP (ptr TABLE SLOT) LOOKED
+    # LIKE A PLAIN LOCAL SLOT AND KEPT THE POINTER "PRIVATE".
+    gep_result_regs = all_gep_regs
 
-    return variable_index_geps, field_stores
+    def is_plain_slot(tok):
+        return not tok.startswith('@') and tok.lstrip('%') not in gep_result_regs
+
+    loads_by_slot = {}
+    for res, slot in ptr_loads:
+        loads_by_slot.setdefault(slot, []).append(res)
+    vals_by_slot = {}
+    for val, slot in ptr_stores:
+        if is_plain_slot(slot) and val.startswith('%'):
+            vals_by_slot.setdefault(slot, []).append(val.lstrip('%'))
+
+    # POINTER-VALUE FLOW EDGES. -O0 PARKS POINTERS IN ALLOCA SLOTS:
+    # store ptr %v, ptr %slot ... %w = load ptr, ptr %slot  =>  %v FLOWS TO %w.
+    flow = {}
+    for slot, vals in vals_by_slot.items():
+        for v in vals:
+            flow.setdefault(v, set()).update(loads_by_slot.get(slot, ()))
+
+    write_targets = stored_registers | atomic_targets | mem_targets
+
+    # DERIVED-POINTER ADJACENCY BUILT ONCE. BFS IS O(EDGES), NOT O(GEPS^2).
+    children = {}
+    for fres, (_, _, fbase) in field_gep_map.items():
+        children.setdefault(fbase, []).append(fres)
+    for sres, (_, sbase) in scalar_geps.items():
+        if sbase.startswith('%'):
+            children.setdefault(sbase.lstrip('%'), []).append(sres)
+    for v, outs in flow.items():
+        children.setdefault(v, []).extend(outs)
+
+    def written_through(root_reg):
+        # BFS: ROOT GEP -> DERIVED GEPS -> SLOT-RELOADED COPIES.
+        # TRUE IF ANY NODE IS A STORE / ATOMIC / MEM-INTRINSIC TARGET.
+        seen = set()
+        queue = [root_reg]
+        while queue:
+            r = queue.pop()
+            if r in seen:
+                continue
+            seen.add(r)
+            if r in write_targets:
+                return True
+            queue.extend(children.get(r, ()))
+        return False
+
+    # INSTANCE PRIVACY (HURON lu_ncb LocalCopies LESSON): POINTER BORN FROM
+    # malloc IN THIS FUNCTION, NEVER STORED OUTSIDE LOCAL SLOTS, NEVER GIVEN
+    # TO pthread_create, NEVER RETURNED => ONE THREAD OWNS IT. NOT SHARED.
+    # OTHER DIRECT CALLS (free, HELPERS) RUN ON THE SAME THREAD: NOT ESCAPE.
+    private = set(malloc_regs)
+    while True:
+        grown = set(private)
+        for slot, vals in vals_by_slot.items():
+            if vals and all(v in private for v in vals):
+                grown.update(loads_by_slot.get(slot, ()))
+        if grown == private:
+            break
+        private = grown
+
+    # ESCAPE IS PER ALIAS GROUP, NOT A WHOLESALE WIPE. REVIEW CAUGHT: ONE
+    # RETURNED malloc MUST NOT UN-PRIVATIZE AN UNRELATED SCRATCH malloc.
+    escape_seeds = set(ret_regs & private)
+    for val, slot in ptr_stores:
+        v = val.lstrip('%')
+        if v in private and not is_plain_slot(slot):
+            escape_seeds.add(v)
+    for line in pthread_lines:
+        # TOKEN-BOUNDARY MATCH. SUBSTRING '%1' IN '%10' BURNED US.
+        for p in private:
+            if re.search(r'%' + re.escape(p) + r'\b', line):
+                escape_seeds.add(p)
+    # CLOSURE OVER SLOT ALIASING: ESCAPED VALUE TAINTS ITS RELOADS AND
+    # SLOT-MATES. OVERAPPROXIMATE = CONSERVATIVE (LESS PRIVACY, NEVER MORE).
+    tainted = set()
+    queue = list(escape_seeds)
+    while queue:
+        r = queue.pop()
+        if r in tainted:
+            continue
+        tainted.add(r)
+        for slot, vals in vals_by_slot.items():
+            if r in vals:
+                queue.extend(vals)
+                queue.extend(loads_by_slot.get(slot, ()))
+        for res, slot in ptr_loads:
+            if res == r:
+                queue.extend(vals_by_slot.get(slot, ()))
+                queue.extend(loads_by_slot.get(slot, ()))
+    private -= tainted
+
+    variable_index_geps = [
+        s for reg, (s, base) in var_geps.items()
+        if written_through(reg) and base.lstrip('%') not in private
+    ]
+    field_stores = [
+        (s, fi) for reg, (s, fi, base) in field_gep_map.items()
+        if reg in stored_registers and base not in private
+    ]
+    # H6 ONLY OWNS FREE-STANDING SCALAR ARRAYS. BASE THAT IS ITSELF A GEP
+    # RESULT = ARRAY EMBEDDED IN A BIGGER OBJECT (ring->buf[i]) = STRUCT
+    # HEURISTIC TERRITORY. ring_head_tail TAUGHT THIS.
+    scalar_writes = [
+        (elem, base) for reg, (elem, base) in scalar_geps.items()
+        if written_through(reg)
+        and base.lstrip('%') not in private
+        and base.lstrip('%') not in gep_result_regs
+    ]
+
+    return variable_index_geps, field_stores, scalar_writes
 
 
 def analyze(ll_path):
@@ -363,13 +525,50 @@ def analyze(ll_path):
     h2_flagged_structs = set()     # STRUCTS ALREADY GOT H2. NO DOUBLE FLAG.
     h1_accesses = {}               # struct_name -> [(field_idx, fn_name), ...]
     h4_array_structs = set()       # struct names seen in variable-index GEPs ANYWHERE
+    h6_flagged = set()             # (base, elem) ALREADY GOT H6.
 
     # STEP 4A: SCAN THREAD-REACHABLE FUNCTIONS. H2 AND H1 ONLY MATTER IN THREADS.
     for fn_name in sorted(thread_reachable):
         if fn_name not in all_functions:
             continue
         fn_lines = all_functions[fn_name]
-        var_idx_geps, field_stores = find_gep_accesses(fn_lines)
+        var_idx_geps, field_stores, scalar_writes = find_gep_accesses(fn_lines)
+
+        # H6 CHECK: VARIABLE-INDEX STORE INTO SHARED SCALAR ARRAY. NO STRUCT.
+        # THE DOMINANT HURON-SUITE PATTERN (false.c, locked, lockless, lu_ncb).
+        # ELEMENT ALWAYS < 64B, SO ADJACENT THREAD SLOTS SHARE A LINE.
+        for elem_type, base in scalar_writes:
+            elem_size = BASE_TYPE_SIZES.get(elem_type, 0)
+            if elem_size <= 0:
+                continue
+            base_label = base if base.startswith('@') else '(pointer)'
+            # KEY INCLUDES fn: TWO THREAD FNS HAMMERING ARRAYS BOTH REPORT.
+            # SAME DEDUP SHAPE AS TIER 2. REVIEW CAUGHT THE DIVERGENCE.
+            key = (fn_name, base_label, elem_type)
+            if key in h6_flagged:
+                continue
+            h6_flagged.add(key)
+            epl = CACHE_LINE_BYTES // elem_size
+            findings.append({
+                'heuristic': 'H6',
+                'severity': 'MEDIUM',
+                'struct': f'{base_label} {elem_type} array',
+                'struct_size_bytes': elem_size,
+                'elements_per_cache_line': epl,
+                'thread_fn': fn_name,
+                'detail': (
+                    f"Variable-index store into shared scalar array "
+                    f"({base_label}, element {elem_type} = {elem_size}B) from "
+                    f"thread function '{fn_name}'. {epl} elements share each "
+                    f"{CACHE_LINE_BYTES}B cache line; thread-id-indexed writes "
+                    f"to adjacent elements cause line ping-pong."
+                ),
+                'fix': (
+                    f"Give each thread a {CACHE_LINE_BYTES}B-aligned slot: stride "
+                    f"indices by {epl}, use a padded per-thread struct, or "
+                    f"allocate with aligned_alloc({CACHE_LINE_BYTES}, ...)."
+                ),
+            })
 
         # H2 CHECK: VARIABLE-INDEX GEP INTO STRUCT SMALLER THAN CACHE LINE.
         # CLASSIC FALSE SHARING. DIFFERENT THREAD WRITE ADJACENT ELEMENT. SAME LINE.
