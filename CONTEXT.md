@@ -9,7 +9,9 @@ _Last updated: 2026-07-03 · branch: h6-round · session: H6 + FP fixes DONE, Hu
 - Corpus now 22 cases (+adv_tp_heap_scalar_array TP, +adv_tn_private_two_fields H1-privacy TN, +adv_tn_readonly_tid_array H2-write TN; global_scalar_array GAP→expected). `evaluate.py` exit 0: tier1 7TP/0FP/0FN/5GAP, tier2 9TP/0FP/0FN/3GAP.
 - Huron re-run: **recall 7/7 (1.00) both tiers**, was 1/7. histogram + string_match are qualified hits (right object, imprecise mechanism). Round-2 section in `results/external_validation.md` has full table.
 - Remaining known issues: H1 LocalCopies FP persists (malloc in SlaveStart, pointer passed to lu() — privacy is intra-function only; fix = interprocedural private-arg propagation); tier2 H6 FP on string_match getnextline (data-dependent index); H7 boundary heuristic would make the histogram hit mechanically correct.
-- NEXT: open PR for h6-round (after /code-review), merge, then interprocedural H1 privacy + H7.
+- PR #4 (h6-round) opened after 8-angle /code-review + fixes (`2cafa3a`).
+- Branch `h7-round` (stacked on h6-round): adopted Gemini implementation_plan.md phases 1/4/6a — H7 boundary heuristic (histogram now FULL hit on thread_arg_t both tiers), lock-call write modeling (mutex_data_same_line GAP -> PASS both tiers; locked_toy mutex-array H2 restored), tier1 %union parsing, parametrized line size (tier1 --line-size, tier2 FS_CACHE_LINE_BYTES). Corpus 23 cases, both tiers 0FP/0FN exit 0, Huron recall stays 7/7. Deferred Gemini phases 2/3/5/6b/7 recorded in WORKPLAN round 5.
+- NEXT: merge PR #4 then PR #5, then interprocedural H1 privacy (LocalCopies FP) or Gemini phase 2 (allocator modeling H8).
 
 ## 1. What changed this session
 - Built `false-sharing-lab/static_analysis/`: two-tier static false-sharing detection lab. tier1 = `ir_analyzer.py` (pure-Python textual IR analysis, H1/H2/H4); tier2 = `tier2_pass/FalseSharingPass.cpp` (out-of-tree LLVM 18 new-PM plugin, H1–H5, exact DataLayout, works at -O1) + `tier2_analyzer.py` wrapper (identical CLI/JSON contract).
