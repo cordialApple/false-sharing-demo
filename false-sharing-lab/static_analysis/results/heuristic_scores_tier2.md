@@ -19,6 +19,7 @@
 | advanced/adv_tn_alignas_atomics | (none) | (none) | PASS |
 | advanced/adv_tn_malloc_per_thread | (none) | (none) | PASS |
 | advanced/adv_tn_private_two_fields | (none) | (none) | PASS |
+| advanced/adv_tn_private_via_helper | (none) | (none) | PASS |
 | advanced/adv_tn_readonly_tid_array | (none) | (none) | PASS |
 | advanced/adv_tp_boundary_args | H7 (barg_t) | H7 %struct.barg_t | PASS |
 | advanced/adv_tp_deceptive_padding | H2 (deceptive_t) | H2 %struct.deceptive_t | PASS |

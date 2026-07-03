@@ -209,6 +209,12 @@
       "expected": [],
       "known_limitation": false,
       "notes": "Threads variable-index a 4B point_t array but only load from it (Phoenix linear_regression POINT_T FP from the Huron run). Regression test for the H2/H4 write requirement: no store through the variable-index GEP chain -> no finding. Result returned via padded per-thread arg struct so H6 stays quiet too."
+    },
+    {
+      "file": "advanced/adv_tn_private_via_helper.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "Interprocedural privacy regression test (Huron lu_ncb LocalCopies FP, second half): thread mallocs private struct, passes it to a static helper that writes both same-bucket fields. Helper's param is private because every call site passes a private value and the helper's address is never taken. H1 must stay quiet in both tiers."
     }
   ]
 }

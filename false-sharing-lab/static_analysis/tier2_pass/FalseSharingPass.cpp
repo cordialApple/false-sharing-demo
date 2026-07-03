@@ -301,22 +301,15 @@ static bool isAllocFnName(StringRef n) {
 }
 
 // ------------------------------------------------------------------------
-// INSTANCE PRIVACY (HURON lu_ncb LocalCopies LESSON). BASE IS PRIVATE TO
-// THE CURRENT THREAD IF IT IS A malloc-FAMILY CALL IN THIS VERY FUNCTION
-// WHOSE RESULT NEVER ESCAPES TO ANOTHER THREAD: NOT STORED OUTSIDE LOCAL
-// ALLOCAS, NOT HANDED TO pthread_create, NOT RETURNED. OTHER DIRECT CALLS
-// (free, SAME-THREAD HELPERS) DO NOT CROSS A THREAD BOUNDARY.
+// LOCAL ESCAPE WALK: TRUE IF root'S VALUE LEAKS TOWARD ANOTHER THREAD --
+// STORED OUTSIDE LOCAL ALLOCAS, HANDED TO pthread_create OR AN UNKNOWN
+// CALLEE, OR RETURNED. OTHER DIRECT CALLS (free, SAME-THREAD HELPERS) DO
+// NOT CROSS A THREAD BOUNDARY; THE CALLEE'S USE IS JUDGED VIA ARGUMENT
+// PRIVACY BELOW.
 // ------------------------------------------------------------------------
-static bool isThreadPrivateAlloc(Value *base, Function *F) {
-  auto *CB = dyn_cast<CallBase>(base);
-  if (!CB || CB->getFunction() != F)
-    return false;
-  Function *callee = CB->getCalledFunction();
-  if (!callee || !isAllocFnName(callee->getName()))
-    return false;
-
+static bool escapesLocally(Value *root) {
   SmallPtrSet<Value *, 16> seen;
-  SmallVector<Value *, 16> wl{CB};
+  SmallVector<Value *, 16> wl{root};
   while (!wl.empty()) {
     Value *v = wl.pop_back_val();
     if (!seen.insert(v).second)
@@ -327,26 +320,71 @@ static bool isThreadPrivateAlloc(Value *base, Function *F) {
           auto *AI = dyn_cast<AllocaInst>(
               getUnderlyingObject(SI->getPointerOperand()));
           if (!AI)
-            return false; // STORED OUTSIDE A LOCAL SLOT. ESCAPED.
+            return true; // STORED OUTSIDE A LOCAL SLOT. ESCAPED.
           for (User *au : AI->users())
             if (auto *LI = dyn_cast<LoadInst>(au))
               wl.push_back(LI);
         }
       } else if (isa<ReturnInst>(u)) {
-        return false;
+        return true;
       } else if (auto *CB2 = dyn_cast<CallBase>(u)) {
         Function *cal = CB2->getCalledFunction();
         // UNKNOWN CALLEE (INDIRECT CALL) COULD BE pthread_create IN A HAT.
-        // NOT GUESS: NOT PRIVATE.
+        // NOT GUESS: ESCAPED.
         if (!cal || cal->getName() == "pthread_create")
-          return false;
+          return true;
       } else if (isa<GetElementPtrInst>(u) || isa<BitCastInst>(u) ||
                  isa<PHINode>(u) || isa<SelectInst>(u)) {
         wl.push_back(cast<Value>(u));
       }
     }
   }
-  return true;
+  return false;
+}
+
+// ------------------------------------------------------------------------
+// INSTANCE PRIVACY (HURON lu_ncb LocalCopies LESSON), NOW INTERPROCEDURAL.
+// PRIVATE IF:
+//   - malloc-FAMILY CALL IN F THAT NEVER ESCAPES LOCALLY; OR
+//   - ARGUMENT OF F WHERE F'S ADDRESS IS NEVER TAKEN (EVERY USER IS A
+//     DIRECT CALL TO F -- pthread_create HANDING F OFF DISQUALIFIES) AND
+//     EVERY CALL SITE PASSES A VALUE ITSELF THREAD-PRIVATE IN ITS CALLER
+//     (RECURSIVE, DEPTH-CAPPED). CLOSES THE LocalCopies FP WHERE THE
+//     PRIVATE POINTER IS PASSED DOWN THROUGH lu()/OneSolve() HELPERS.
+// ------------------------------------------------------------------------
+static bool isPrivateBase(Value *base, Function *F, int depth) {
+  if (depth > 6)
+    return false;
+  if (auto *CB = dyn_cast<CallBase>(base)) {
+    if (CB->getFunction() != F)
+      return false;
+    Function *callee = CB->getCalledFunction();
+    if (!callee || !isAllocFnName(callee->getName()))
+      return false;
+    return !escapesLocally(CB);
+  }
+  if (auto *A = dyn_cast<Argument>(base)) {
+    if (A->getParent() != F)
+      return false;
+    bool anyCall = false;
+    for (User *u : F->users()) {
+      auto *CB = dyn_cast<CallBase>(u);
+      if (!CB || CB->getCalledFunction() != F)
+        return false; // ADDRESS TAKEN (E.G. THREAD ENTRY). NOT PRIVATE.
+      if (A->getArgNo() >= CB->arg_size())
+        return false;
+      anyCall = true;
+      Value *passed = CB->getArgOperand(A->getArgNo());
+      if (!isPrivateBase(resolveBase(passed), CB->getFunction(), depth + 1))
+        return false;
+    }
+    return anyCall && !escapesLocally(A);
+  }
+  return false;
+}
+
+static bool isThreadPrivateAlloc(Value *base, Function *F) {
+  return isPrivateBase(base, F, 0);
 }
 
 // ========================================================================

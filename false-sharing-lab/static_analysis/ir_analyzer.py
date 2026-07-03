@@ -274,14 +274,19 @@ SCALAR_TYPES_RE = '(?:' + '|'.join(
 ) + ')'
 
 
-def find_gep_accesses(fn_lines):
+def find_gep_accesses(fn_lines, private_params=frozenset()):
     """
     Scan function lines for GEP instructions relevant to false-sharing detection.
+
+    private_params: register names of pointer parameters proven thread-private
+    at every call site (interprocedural privacy seeds).
 
     Returns:
       variable_index_geps: struct names var-indexed AND written through (H2/H4 signal)
       field_stores:        (struct_name, field_idx) written, non-private base (H1 signal)
       scalar_writes:       (elem_type, base_token) var-indexed scalar stores (H6 signal)
+      var_geps:            raw result_reg -> (struct_name, base) map (H7 consumes)
+      private:             final set of thread-private pointer registers
     """
     # GEP SHAPES HUNTED HERE:
     #
@@ -460,7 +465,7 @@ def find_gep_accesses(fn_lines):
     # malloc IN THIS FUNCTION, NEVER STORED OUTSIDE LOCAL SLOTS, NEVER GIVEN
     # TO pthread_create, NEVER RETURNED => ONE THREAD OWNS IT. NOT SHARED.
     # OTHER DIRECT CALLS (free, HELPERS) RUN ON THE SAME THREAD: NOT ESCAPE.
-    private = set(malloc_regs)
+    private = set(malloc_regs) | set(private_params)
     while True:
         grown = set(private)
         for slot, vals in vals_by_slot.items():
@@ -521,7 +526,7 @@ def find_gep_accesses(fn_lines):
         and base.lstrip('%') not in gep_result_regs
     ]
 
-    return variable_index_geps, field_stores, scalar_writes, var_geps
+    return variable_index_geps, field_stores, scalar_writes, var_geps, private
 
 
 def analyze(ll_path):
@@ -544,6 +549,65 @@ def analyze(ll_path):
     entry_fn_names = [entry for _, entry, _ in thread_entry_pairs]
     thread_reachable = build_call_closure(entry_fn_names, all_functions)
 
+    # STEP 3B: INTERPROCEDURAL PRIVATE-PARAM PROPAGATION (lu_ncb LocalCopies
+    # LESSON): PRIVATE malloc POINTER PASSED DOWN TO A HELPER MUST STAY
+    # PRIVATE THERE. FIXPOINT: CALLEE PARAM IS PRIVATE IFF EVERY CALL SITE
+    # PASSES A PRIVATE VALUE AND THE CALLEE'S ADDRESS IS NEVER TAKEN.
+    param_re = re.compile(r'^define\s+[^(]*@\w+\s*\(([^)]*)\)')
+    call_site_re = re.compile(r'\bcall\b[^@]*@(\w+)\((.*)\)')
+    arg_reg_re = re.compile(r'%([\w.]+)\s*$')
+    fn_params = {}
+    for fn, fl in all_functions.items():
+        m = param_re.match(fl[0])
+        toks = split_type_list(m.group(1)) if m else []
+        fn_params[fn] = [
+            (arg_reg_re.search(t.strip()).group(1)
+             if arg_reg_re.search(t.strip()) else None)
+            for t in toks
+        ]
+
+    # ADDRESS-TAKEN FUNCTIONS: THREAD ENTRIES, OR NAME PASSED AS AN ARG
+    # SOMEWHERE. THEIR PARAMS ARRIVE FROM OUTSIDE THE VISIBLE CALL SITES.
+    addr_taken = set(entry_fn_names)
+    for fn, fl in all_functions.items():
+        for line in fl:
+            cm = call_site_re.search(line)
+            if not cm:
+                continue
+            for tok in split_type_list(cm.group(2)):
+                am = re.search(r'@(\w+)', tok)
+                if am:
+                    addr_taken.add(am.group(1))
+
+    private_params = {fn: frozenset() for fn in all_functions}
+    facts = {}
+    for _ in range(4):
+        for fn, fl in all_functions.items():
+            facts[fn] = find_gep_accesses(fl, private_params[fn])
+        votes = {}
+        for fn, fl in all_functions.items():
+            priv = facts[fn][4]
+            for line in fl:
+                cm = call_site_re.search(line)
+                if not cm or cm.group(1) not in all_functions:
+                    continue
+                callee = cm.group(1)
+                for k, tok in enumerate(split_type_list(cm.group(2))):
+                    rm = arg_reg_re.search(tok.strip())
+                    is_priv = bool(rm) and rm.group(1) in priv
+                    ok, n = votes.get((callee, k), (True, 0))
+                    votes[(callee, k)] = (ok and is_priv, n + 1)
+        new_map = {fn: set() for fn in all_functions}
+        for (callee, k), (ok, n) in votes.items():
+            if ok and n > 0 and callee not in addr_taken:
+                params = fn_params.get(callee, [])
+                if k < len(params) and params[k]:
+                    new_map[callee].add(params[k])
+        new_map = {fn: frozenset(v) for fn, v in new_map.items()}
+        if new_map == private_params:
+            break
+        private_params = new_map
+
     findings = []
     h2_flagged_structs = set()     # STRUCTS ALREADY GOT H2. NO DOUBLE FLAG.
     h1_accesses = {}               # struct_name -> [(field_idx, fn_name), ...]
@@ -554,8 +618,7 @@ def analyze(ll_path):
     for fn_name in sorted(thread_reachable):
         if fn_name not in all_functions:
             continue
-        fn_lines = all_functions[fn_name]
-        var_idx_geps, field_stores, scalar_writes, _ = find_gep_accesses(fn_lines)
+        var_idx_geps, field_stores, scalar_writes, _, _ = facts[fn_name]
 
         # H6 CHECK: VARIABLE-INDEX STORE INTO SHARED SCALAR ARRAY. NO STRUCT.
         # THE DOMINANT HURON-SUITE PATTERN (false.c, locked, lockless, lu_ncb).
@@ -713,7 +776,7 @@ def analyze(ll_path):
     for caller, entry, arg_reg in thread_entry_pairs:
         if arg_reg is None or caller not in all_functions:
             continue
-        _, _, _, caller_var_geps = find_gep_accesses(all_functions[caller])
+        caller_var_geps = facts[caller][3]
         if arg_reg not in caller_var_geps:
             continue
         struct_name, _base = caller_var_geps[arg_reg]
