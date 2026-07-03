@@ -1,6 +1,14 @@
 # CONTEXT.md
 
-_Last updated: 2026-07-02 ~17:30 · branch: static-analysis-lab · session: platform built + reviewed + PR #1 ready; next session = external-dataset validation_
+_Last updated: 2026-07-02 ~19:45 · branch: external-validation · session: Huron external validation DONE; next = H6 + H7 heuristics from measured gaps_
+
+## 0. This session (external validation — supersedes "next step" below)
+- Branch `external-validation` (off static-analysis-lab). PR #1 untouched, still open.
+- Cloned efeslab/huron (PLDI'19) in WSL `~/huron`; compiled 7 C test-suite programs to IR (`external/build_huron_ir.sh`, IR gitignored); ran BOTH tiers.
+- Result: recall 1/7 (0.14) both tiers — the one hit is the canonical linear_regression `lreg_args` bug via H1. Full hit/miss/FP table + failure modes: `static_analysis/results/external_validation.md`.
+- Measured gaps, priority order: (1) H6 scalar heap arrays = 4 of 6 misses (false.c, locked, lockless, lu_ncb); (2) new "H7" large-struct boundary (histogram: 3096B struct, size%64≠0); (3) string_match allocator-adjacency = out of static scope, documented.
+- FP root causes found: H2 fires without any store (read-only POINT_T flagged HIGH); H1 has no instance-privacy (per-thread-malloc'd LocalCopies flagged).
+- NEXT: implement H6 + H2 write-requirement + H1 privacy fix, re-run Huron suite as the honest benchmark, then H7 boundary heuristic.
 
 ## 1. What changed this session
 - Built `false-sharing-lab/static_analysis/`: two-tier static false-sharing detection lab. tier1 = `ir_analyzer.py` (pure-Python textual IR analysis, H1/H2/H4); tier2 = `tier2_pass/FalseSharingPass.cpp` (out-of-tree LLVM 18 new-PM plugin, H1–H5, exact DataLayout, works at -O1) + `tier2_analyzer.py` wrapper (identical CLI/JSON contract).
