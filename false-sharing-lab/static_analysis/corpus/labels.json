@@ -171,8 +171,32 @@
           "severity": "MEDIUM"
         }
       ],
-      "known_limitation": true,
-      "notes": "Both tiers MISS. Plain global long counters[8], no struct. Thread i writes counters[tid]++. 8 longs = 64B, all on one cache line. H2 is struct-typed; H5 requires distinct global symbols. Neither covers variable-index stores into global scalar arrays. H6 candidate: variable-index store into global scalar array where element size < 64B. Next heuristic to implement."
+      "known_limitation": false,
+      "notes": "Plain global long counters[8], no struct. Thread i writes counters[tid]++. 8 longs = 64B, all on one cache line. H6 (implemented in both tiers after the Huron round showed this is the dominant real-world pattern): variable-index store into shared scalar array, element size < 64B, thread-reachable."
+    },
+    {
+      "file": "advanced/adv_tp_heap_scalar_array.c",
+      "expected": [
+        {
+          "heuristic": "H6",
+          "struct_contains": null,
+          "severity": "MEDIUM"
+        }
+      ],
+      "known_limitation": false,
+      "notes": "Heap int array via global pointer, thread i writes counters[tid]++. The dominant Huron-suite shape (false.c, locked, lockless, lu_ncb). H6 must fire on heap/pointer bases, not just fixed global arrays."
+    },
+    {
+      "file": "advanced/adv_tn_private_two_fields.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "Thread mallocs own two-field scratch struct and writes both fields (same 64B bucket). Regression test for the H1 instance-privacy fix (Huron lu_ncb LocalCopies FP): pointer born from malloc inside the thread fn, never stored outside local allocas, never passed to pthread_create, never returned -> instance is thread-private, H1 must stay quiet."
+    },
+    {
+      "file": "advanced/adv_tn_readonly_tid_array.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "Threads variable-index a 4B point_t array but only load from it (Phoenix linear_regression POINT_T FP from the Huron run). Regression test for the H2/H4 write requirement: no store through the variable-index GEP chain -> no finding. Result returned via padded per-thread arg struct so H6 stays quiet too."
     }
   ]
 }

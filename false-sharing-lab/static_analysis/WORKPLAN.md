@@ -71,6 +71,28 @@ Open gaps (= heuristic roadmap, all labeled in corpus/labels.json):
 - **Function-pointer thread entry** (both): fundamental static limit.
 - **H3/H5 in tier1**: atomics + globals unimplemented in the regex tier (tier2 covers).
 
+## Round 4 — H6 + Huron-driven FP fixes (2026-07-03)
+
+| Phase | Task | Worker | Status |
+|---|---|---|---|
+| 14. H6 both tiers | Variable-index store into free-standing shared scalar array (heap ptr, fixed global, arg base; skip stack-local, thread-private-heap, struct-embedded) | Orchestrator (Fable) | DONE |
+| 15. H2/H4 write requirement | Fire only if a store/atomic flows through the variable-index GEP chain (incl. -O0 alloca-parked pointer reloads) | Orchestrator (Fable) | DONE |
+| 16. H1 instance privacy | Skip struct instances malloc'd in the thread fn whose pointer never escapes to another thread (intra-function) | Orchestrator (Fable) | DONE |
+| 17. Corpus regression cases | adv_tp_heap_scalar_array (H6 TP), adv_tn_private_two_fields (H1 privacy TN), adv_tn_readonly_tid_array (H2 write-req TN); adv_tp_global_scalar_array flipped GAP→expected | Orchestrator | DONE |
+| 18. Huron re-run | Honest benchmark re-run | Orchestrator | DONE — recall 0.14 → **1.00** (7/7, 2 qualified), see results/external_validation.md round 2 |
+
+### Round-4 scores (22 cases, exit 0)
+
+| Analyzer | TP | FP | FN | GAP | Precision | Recall |
+|---|---|---|---|---|---|---|
+| tier1 | 7 | 0 | 0 | 5 | 1.00 | 1.00 |
+| tier2 | 9 | 0 | 0 | 3 | 1.00 | 1.00 |
+
+Remaining roadmap: interprocedural H1 privacy (lu_ncb LocalCopies FP),
+H7 large-struct boundary mechanism (histogram flagged via H6 but with
+imprecise rationale), nested-field attribution, opaque-call escape,
+fn-ptr thread entry, tier1 H3/H5.
+
 ## Architecture (mirrors c_benchmark + agent workflow)
 
 ```

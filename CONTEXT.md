@@ -1,14 +1,15 @@
 # CONTEXT.md
 
-_Last updated: 2026-07-02 ~19:45 · branch: external-validation · session: Huron external validation DONE; next = H6 + H7 heuristics from measured gaps_
+_Last updated: 2026-07-03 · branch: h6-round · session: H6 + FP fixes DONE, Huron recall 0.14 → 1.00; next = merge PR, then interprocedural H1 privacy + H7_
 
-## 0. This session (external validation — supersedes "next step" below)
-- Branch `external-validation` (off static-analysis-lab). PR #1 untouched, still open.
-- Cloned efeslab/huron (PLDI'19) in WSL `~/huron`; compiled 7 C test-suite programs to IR (`external/build_huron_ir.sh`, IR gitignored); ran BOTH tiers.
-- Result: recall 1/7 (0.14) both tiers — the one hit is the canonical linear_regression `lreg_args` bug via H1. Full hit/miss/FP table + failure modes: `static_analysis/results/external_validation.md`.
-- Measured gaps, priority order: (1) H6 scalar heap arrays = 4 of 6 misses (false.c, locked, lockless, lu_ncb); (2) new "H7" large-struct boundary (histogram: 3096B struct, size%64≠0); (3) string_match allocator-adjacency = out of static scope, documented.
-- FP root causes found: H2 fires without any store (read-only POINT_T flagged HIGH); H1 has no instance-privacy (per-thread-malloc'd LocalCopies flagged).
-- NEXT: implement H6 + H2 write-requirement + H1 privacy fix, re-run Huron suite as the honest benchmark, then H7 boundary heuristic.
+## 0. This session (H6 round — supersedes older sections below)
+- PRs #1/#2/#3 all merged to main; grok mentions erased from all files (`2dcb610`, direct push authorized); local+remote branch cleanup done except `origin/static-analysis-lab` (remote delete permission denied — user deletes by hand).
+- Branch `h6-round` off main: implemented in BOTH tiers: (1) H6 = variable-index store into free-standing shared scalar array (heap/global/arg base; skips stack-local, thread-private-heap, struct-embedded bases); (2) H2/H4 write requirement — store or atomic must flow through the var-index GEP chain (follows -O0 alloca-parked pointer reloads); (3) H1 intra-function instance privacy (malloc in thread fn, pointer never stored outside local slots / passed to pthread_create / returned).
+- Tier1 subtleties learned: atomicrmw/cmpxchg count as writes for H2/H6 but NOT H1 (atomics are H3's, same split as tier2); H6 must reject bases that are themselves GEP results (ring->buf[i] FP).
+- Corpus now 22 cases (+adv_tp_heap_scalar_array TP, +adv_tn_private_two_fields H1-privacy TN, +adv_tn_readonly_tid_array H2-write TN; global_scalar_array GAP→expected). `evaluate.py` exit 0: tier1 7TP/0FP/0FN/5GAP, tier2 9TP/0FP/0FN/3GAP.
+- Huron re-run: **recall 7/7 (1.00) both tiers**, was 1/7. histogram + string_match are qualified hits (right object, imprecise mechanism). Round-2 section in `results/external_validation.md` has full table.
+- Remaining known issues: H1 LocalCopies FP persists (malloc in SlaveStart, pointer passed to lu() — privacy is intra-function only; fix = interprocedural private-arg propagation); tier2 H6 FP on string_match getnextline (data-dependent index); H7 boundary heuristic would make the histogram hit mechanically correct.
+- NEXT: open PR for h6-round (after /code-review), merge, then interprocedural H1 privacy + H7.
 
 ## 1. What changed this session
 - Built `false-sharing-lab/static_analysis/`: two-tier static false-sharing detection lab. tier1 = `ir_analyzer.py` (pure-Python textual IR analysis, H1/H2/H4); tier2 = `tier2_pass/FalseSharingPass.cpp` (out-of-tree LLVM 18 new-PM plugin, H1–H5, exact DataLayout, works at -O1) + `tier2_analyzer.py` wrapper (identical CLI/JSON contract).

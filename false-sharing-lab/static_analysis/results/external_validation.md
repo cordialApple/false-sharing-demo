@@ -86,6 +86,53 @@ Treating the four "plausible" extras generously as true positives: tier1 5/7, ti
 - Both FP root causes (no-write-check H2, no-privacy H1) are fixable without new
   infrastructure.
 
+## Round 2 — after H6 + FP fixes (2026-07-03, branch `h6-round`)
+
+Changes since round 1: H6 implemented in both tiers (variable-index store into
+free-standing shared scalar array), H2/H4 now require a store through the
+variable-index GEP chain, H1 skips thread-private malloc instances
+(intra-function escape analysis). In-house corpus grew to 22 cases (3 new
+regression cases from this dataset's failure modes); both tiers exit 0 on it.
+
+| Program | Ground-truth site | Tier 1 | Tier 2 |
+|---|---|---|---|
+| `false.c` | heap `int *array` | **HIT** (H6) | **HIT** (H6) |
+| `histogram` | `thread_arg_t` array boundaries | **HIT*** (H6 via hoisted `thread_arg->red` pointers) | **HIT*** (same) |
+| `linear_regression` | `lreg_args` | **HIT** (H1) | **HIT** (H1) |
+| `locked/toy.c` | heap `int *dynMemory` | **HIT** (H6) | **HIT** (H6) |
+| `lockless/toy.c` | same | **HIT** (H6) | **HIT** (H6) |
+| `lu_ncb` | heap `double *a` matrix | **HIT** (H6) | **HIT** (H6) |
+| `string_match` | `key1_final`/`key2_final` buffers | **HIT*** (H6 in `compute_hashes`) | **HIT*** (same) |
+
+**Recall vs ground truth: 7/7 (1.00) both tiers, up from 1/7 (0.14).**
+
+*Qualified hits (right object, imprecise mechanism):* `histogram` and
+`string_match` flag exactly the memory Huron's fix realigned, but H6's stated
+mechanism (thread-id-indexed adjacent elements) is not the true one there
+(element-boundary straddling resp. allocator adjacency). A dedicated H7
+boundary heuristic would state the histogram mechanism correctly; the
+string_match adjacency remains statically invisible in principle — H6 catches
+it only because the buffers are globally visible and variable-index written.
+
+### Round-1 FPs resolved
+
+- H2 HIGH on read-only `POINT_T` (`linear_regression`): **gone** (write requirement).
+- H2 HIGH on `pthread_mutex_t` array (`locked`, tier2): **gone** (write requirement; locking is calls, not stores).
+
+### Remaining extra findings
+
+| Finding | Assessment |
+|---|---|
+| H1 on `%struct.GlobalMemory` ×2 + barrier `%struct.anon` (`lu_ncb`, both tiers) | Plausible-but-unconfirmed, unchanged from round 1: real contention candidates (`Global->id++` under lock, packed barrier struct), just not what Huron fixed. |
+| H1 on `%struct.LocalCopies` (`lu_ncb`, both tiers) | **Still FP.** The malloc is in `SlaveStart` but the pointer is passed to `lu()`, and the privacy check is intra-function only. Fix direction: interprocedural privacy (private-arg propagation). The corpus case `adv_tn_private_two_fields` proves the intra-function half works. |
+| H6 on `(pointer) i8 array` in `getnextline` (`string_match`, tier2 only) | FP vs ground truth: writes into the caller's line buffer; index is data-dependent, not tid-strided. |
+
+Strict per-object precision: tier1 7/11 (0.64, was 0.29), tier2 7/12 (0.58, was
+0.25); counting the three plausible `lu_ncb` extras generously: tier1 10/11,
+tier2 10/12. The 1.00 in-house corpus scores remain regression gates, not
+generalization claims — but the external gap has closed from 0.14 to 1.00
+recall on this suite.
+
 ## Reproduce
 
 ```sh

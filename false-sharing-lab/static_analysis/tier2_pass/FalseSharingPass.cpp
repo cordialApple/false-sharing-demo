@@ -208,6 +208,122 @@ static bool getStructField(const DataLayout &DL, Value *ptr, StructType *&st,
   return false; // NO BASE, NO TYPED GEP. NOT GUESS.
 }
 
+// ------------------------------------------------------------------------
+// WRITE-THROUGH CHECK (HURON LESSON: READ-ONLY SHARING IS FREE).
+// TRUE IF SOME STORE/ATOMIC WRITES THROUGH root OR A POINTER DERIVED FROM
+// IT (GEP/CAST/PHI/SELECT CHAIN, PLUS -O0 PARK-IN-ALLOCA-AND-RELOAD).
+// ------------------------------------------------------------------------
+static bool hasStoreThrough(Value *root) {
+  SmallPtrSet<Value *, 16> seen;
+  SmallVector<Value *, 16> wl{root};
+  while (!wl.empty()) {
+    Value *v = wl.pop_back_val();
+    if (!seen.insert(v).second)
+      continue;
+    for (User *u : v->users()) {
+      if (auto *SI = dyn_cast<StoreInst>(u)) {
+        if (SI->getPointerOperand() == v)
+          return true;
+        // POINTER SAVED TO LOCAL SLOT. FOLLOW THE RELOADS.
+        if (SI->getValueOperand() == v)
+          if (auto *AI = dyn_cast<AllocaInst>(SI->getPointerOperand()))
+            for (User *au : AI->users())
+              if (auto *LI = dyn_cast<LoadInst>(au))
+                wl.push_back(LI);
+      } else if (auto *RMW = dyn_cast<AtomicRMWInst>(u)) {
+        if (RMW->getPointerOperand() == v)
+          return true;
+      } else if (auto *CX = dyn_cast<AtomicCmpXchgInst>(u)) {
+        if (CX->getPointerOperand() == v)
+          return true;
+      } else if (isa<GetElementPtrInst>(u) || isa<BitCastInst>(u) ||
+                 isa<PHINode>(u) || isa<SelectInst>(u)) {
+        wl.push_back(cast<Value>(u));
+      }
+    }
+  }
+  return false;
+}
+
+// ------------------------------------------------------------------------
+// BASE RESOLUTION THROUGH -O0 ALLOCA SLOTS. getUnderlyingObject STOPS AT A
+// LOAD; IF THAT LOAD READS A LOCAL SLOT WITH EXACTLY ONE STORED VALUE,
+// CHASE THAT VALUE. p = malloc(); USE p->f  RESOLVES TO THE malloc CALL.
+// ------------------------------------------------------------------------
+static Value *resolveBase(Value *p, int depth = 0) {
+  Value *base = getUnderlyingObject(p);
+  if (depth > 8)
+    return base;
+  if (auto *LI = dyn_cast<LoadInst>(base)) {
+    if (auto *AI = dyn_cast<AllocaInst>(
+            getUnderlyingObject(LI->getPointerOperand()))) {
+      Value *stored = nullptr;
+      for (User *u : AI->users())
+        if (auto *SI = dyn_cast<StoreInst>(u))
+          if (SI->getPointerOperand() == AI) {
+            if (stored)
+              return base; // TWO STORES. AMBIGUOUS. STOP HERE.
+            stored = SI->getValueOperand();
+          }
+      if (stored)
+        return resolveBase(stored, depth + 1);
+    }
+  }
+  return base;
+}
+
+static bool isAllocFnName(StringRef n) {
+  return n == "malloc" || n == "calloc" || n == "aligned_alloc" ||
+         n == "realloc";
+}
+
+// ------------------------------------------------------------------------
+// INSTANCE PRIVACY (HURON lu_ncb LocalCopies LESSON). BASE IS PRIVATE TO
+// THE CURRENT THREAD IF IT IS A malloc-FAMILY CALL IN THIS VERY FUNCTION
+// WHOSE RESULT NEVER ESCAPES TO ANOTHER THREAD: NOT STORED OUTSIDE LOCAL
+// ALLOCAS, NOT HANDED TO pthread_create, NOT RETURNED. OTHER DIRECT CALLS
+// (free, SAME-THREAD HELPERS) DO NOT CROSS A THREAD BOUNDARY.
+// ------------------------------------------------------------------------
+static bool isThreadPrivateAlloc(Value *base, Function *F) {
+  auto *CB = dyn_cast<CallBase>(base);
+  if (!CB || CB->getFunction() != F)
+    return false;
+  Function *callee = CB->getCalledFunction();
+  if (!callee || !isAllocFnName(callee->getName()))
+    return false;
+
+  SmallPtrSet<Value *, 16> seen;
+  SmallVector<Value *, 16> wl{CB};
+  while (!wl.empty()) {
+    Value *v = wl.pop_back_val();
+    if (!seen.insert(v).second)
+      continue;
+    for (User *u : v->users()) {
+      if (auto *SI = dyn_cast<StoreInst>(u)) {
+        if (SI->getValueOperand() == v) {
+          auto *AI = dyn_cast<AllocaInst>(
+              getUnderlyingObject(SI->getPointerOperand()));
+          if (!AI)
+            return false; // STORED OUTSIDE A LOCAL SLOT. ESCAPED.
+          for (User *au : AI->users())
+            if (auto *LI = dyn_cast<LoadInst>(au))
+              wl.push_back(LI);
+        }
+      } else if (isa<ReturnInst>(u)) {
+        return false;
+      } else if (auto *CB2 = dyn_cast<CallBase>(u)) {
+        Function *cal = CB2->getCalledFunction();
+        if (cal && cal->getName() == "pthread_create")
+          return false;
+      } else if (isa<GetElementPtrInst>(u) || isa<BitCastInst>(u) ||
+                 isa<PHINode>(u) || isa<SelectInst>(u)) {
+        wl.push_back(cast<Value>(u));
+      }
+    }
+  }
+  return true;
+}
+
 // ========================================================================
 // STEP 1 -- THREAD REACHABILITY.
 // FIND PTHREAD_CREATE. TAKE ARG #2 (0-BASED THIRD PARAM). STRIP CAST.
@@ -294,6 +410,9 @@ static void runH2(FSContext &Ctx) {
         GepInfo gi = analyzeGep(cast<GEPOperator>(GEP));
         if (!gi.structTy || !gi.variableArrayIndex)
           continue;
+        // WRITE REQUIREMENT. READ-ONLY VAR-INDEX SCAN IS HARMLESS.
+        if (!hasStoreThrough(GEP))
+          continue;
         std::string key = structKey(gi.structTy);
         uint64_t sz = Ctx.DL.getStructLayout(gi.structTy)->getSizeInBytes();
         if (sz >= CACHE_LINE_BYTES)
@@ -350,6 +469,9 @@ static void runH1(FSContext &Ctx) {
         StructType *st = nullptr;
         unsigned fi = 0;
         if (!getStructField(Ctx.DL, SI->getPointerOperand(), st, fi))
+          continue;
+        // PER-THREAD PRIVATE INSTANCE CANNOT FALSE-SHARE WITH ITSELF.
+        if (isThreadPrivateAlloc(resolveBase(SI->getPointerOperand()), F))
           continue;
         acc[structKey(st)][fi].insert(F->getName().str());
         keyToTy[structKey(st)] = st;
@@ -524,7 +646,7 @@ static void runH4(FSContext &Ctx) {
         if (!GEP)
           continue;
         GepInfo gi = analyzeGep(cast<GEPOperator>(GEP));
-        if (gi.structTy && gi.variableArrayIndex)
+        if (gi.structTy && gi.variableArrayIndex && hasStoreThrough(GEP))
           arrayStructs[structKey(gi.structTy)] = gi.structTy;
       }
     }
@@ -644,6 +766,96 @@ static void runH5(FSContext &Ctx) {
           "(alignas(64) on each, or group thread-private state).",
           nameA, nameB).str();
       Ctx.findings.push_back(std::move(f));
+    }
+  }
+}
+
+// ========================================================================
+// HEURISTIC H6 (MEDIUM) -- VARIABLE-INDEX STORE INTO SHARED SCALAR ARRAY.
+// NO STRUCT ANYWHERE: int*/double* HEAP ARRAY OR FIXED GLOBAL SCALAR ARRAY
+// INDEXED BY THREAD ID. THE DOMINANT HURON-SUITE PATTERN (false.c, locked,
+// lockless, lu_ncb -- 4 OF 7 GROUND-TRUTH BUGS). REQUIRES A STORE THROUGH
+// THE GEP. STACK-LOCAL AND THREAD-PRIVATE-HEAP BASES ARE ONE-THREAD-ONLY:
+// SKIP.
+// ========================================================================
+static void runH6(FSContext &Ctx) {
+  std::set<std::pair<std::string, std::string>> flagged; // (fn, base key)
+  for (Function *F : sortedThreadFns(Ctx)) {
+    if (F->isDeclaration())
+      continue;
+    for (BasicBlock &BB : *F) {
+      for (Instruction &I : BB) {
+        auto *GEP = dyn_cast<GetElementPtrInst>(&I);
+        if (!GEP)
+          continue;
+        Type *src = GEP->getSourceElementType();
+        Type *elem = nullptr;
+        bool varIdx = false;
+        if (src->isIntegerTy() || src->isFloatingPointTy()) {
+          // RAW POINTER WALK: gep i32, ptr %p, i64 %var
+          elem = src;
+          varIdx = !isa<ConstantInt>(GEP->getOperand(1));
+        } else if (auto *AT = dyn_cast<ArrayType>(src)) {
+          // FIXED ARRAY: gep [8 x i64], ptr @g, i64 0, i64 %var
+          Type *et = AT->getElementType();
+          if ((et->isIntegerTy() || et->isFloatingPointTy()) &&
+              GEP->getNumOperands() >= 3) {
+            elem = et;
+            varIdx = !isa<ConstantInt>(GEP->getOperand(2));
+          }
+        }
+        if (!elem || !varIdx)
+          continue;
+        // DERIVED BASE (ring->buf[i]) = SCALAR ARRAY EMBEDDED IN A BIGGER
+        // OBJECT. STRUCT HEURISTICS OWN THAT. H6 ONLY FREE-STANDING ARRAYS.
+        if (isa<GEPOperator>(GEP->getPointerOperand()->stripPointerCasts()))
+          continue;
+        if (!hasStoreThrough(GEP))
+          continue;
+        uint64_t esz = Ctx.DL.getTypeAllocSize(elem);
+        if (esz == 0 || esz >= CACHE_LINE_BYTES)
+          continue;
+
+        Value *base = resolveBase(GEP->getPointerOperand());
+        if (isa<AllocaInst>(base))
+          continue; // STACK ARRAY IN THREAD FN. ONE THREAD ONLY.
+        if (isThreadPrivateAlloc(base, F))
+          continue; // PRIVATE HEAP BLOCK. SAME PRIVACY RULE AS H1.
+        std::string baseName;
+        if (auto *GV = dyn_cast<GlobalVariable>(base))
+          baseName = ("@" + GV->getName()).str();
+        else
+          baseName = "(pointer)";
+
+        std::string key = baseName + " " + typeToString(elem) + " array";
+        std::string fn = F->getName().str();
+        if (!flagged.insert({fn, key}).second)
+          continue;
+
+        int64_t epl = (int64_t)(CACHE_LINE_BYTES / esz);
+        Finding f;
+        f.heuristic = "H6";
+        f.severity = "MEDIUM";
+        f.structName = key;
+        f.structSizeBytes = (int64_t)esz;
+        f.hasEPL = true;
+        f.epl = epl;
+        f.hasThreadFn = true;
+        f.threadFn = fn;
+        f.detail = formatv(
+            "Variable-index store into shared scalar array ({0}, element "
+            "{1} = {2}B) from thread function '{3}'. {4} elements share each "
+            "{5}B cache line; thread-id-indexed writes to adjacent elements "
+            "cause line ping-pong.",
+            baseName, typeToString(elem), esz, fn, epl,
+            CACHE_LINE_BYTES).str();
+        f.fix = formatv(
+            "Give each thread a {0}B-aligned slot: stride indices by {1}, "
+            "use a padded per-thread struct, or allocate with "
+            "aligned_alloc({0}, ...).",
+            CACHE_LINE_BYTES, epl).str();
+        Ctx.findings.push_back(std::move(f));
+      }
     }
   }
 }
@@ -783,6 +995,7 @@ struct FalseSharingPass : PassInfoMixin<FalseSharingPass> {
     runH3(Ctx);   // HIGH -- ATOMIC FIELD SAME LINE.
     runH1(Ctx);   // MEDIUM -- TWO FIELD SAME LINE.
     runH5(Ctx);   // MEDIUM -- TWO SMALL GLOBAL.
+    runH6(Ctx);   // MEDIUM -- SCALAR ARRAY INDEXED BY THREAD.
     runH4(Ctx);   // LOW  -- STRADDLE ARRAY ELEMENT.
 
     // ONE SUPPRESSION PASS AFTER ALL HEURISTIC SPEAK. POLICY IN ONE PLACE.

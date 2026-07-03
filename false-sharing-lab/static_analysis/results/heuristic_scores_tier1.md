@@ -8,8 +8,8 @@
 | H2 | 3 | 0 | 0 | 1 | 0 | 1.00 | 1.00 |
 | H3 | 0 | 0 | 0 | 1 | 0 | N/A | N/A |
 | H5 | 0 | 0 | 0 | 1 | 0 | N/A | N/A |
-| H6 | 0 | 0 | 0 | 1 | 0 | N/A | N/A |
-| **TOTAL** | **5** | **0** | **0** | **6** | **0** | **1.00** | **1.00** |
+| H6 | 2 | 0 | 0 | 0 | 0 | 1.00 | 1.00 |
+| **TOTAL** | **7** | **0** | **0** | **5** | **0** | **1.00** | **1.00** |
 
 ## Per-Case Detail
 
@@ -17,8 +17,11 @@
 |------|----------|-----|---------|
 | advanced/adv_tn_alignas_atomics | (none) | (none) | PASS |
 | advanced/adv_tn_malloc_per_thread | (none) | (none) | PASS |
+| advanced/adv_tn_private_two_fields | (none) | (none) | PASS |
+| advanced/adv_tn_readonly_tid_array | (none) | (none) | PASS |
 | advanced/adv_tp_deceptive_padding | H2 (deceptive_t) | H2 %struct.deceptive_t | PASS |
-| advanced/adv_tp_global_scalar_array | H6 | (none) | GAP |
+| advanced/adv_tp_global_scalar_array | H6 | H6 @counters i64 array | PASS |
+| advanced/adv_tp_heap_scalar_array | H6 | H6 (pointer) i32 array | PASS |
 | advanced/adv_tp_mutex_data_same_line | H1 (mutex_counter_t) | (none) | GAP |
 | advanced/adv_tp_nested_inner_fields | H1 (outer) | (none) | GAP |
 | advanced/adv_tp_ring_head_tail | H1 (spsc_ring_t) | H1 %struct.spsc_ring_t | PASS |
@@ -38,6 +41,6 @@
 
 - **Unexpected FP** (false alarms on TN cases): 0
 - **Unexpected FN / MISS** (TP cases not caught): 0
-- **Known Gaps** (known_limitation=true, not penalized): 6
+- **Known Gaps** (known_limitation=true, not penalized): 5
 - **Known FP** (known_fp=[...], not penalized): 0
 - **Analyzer errors** (case not analyzed at all): 0
