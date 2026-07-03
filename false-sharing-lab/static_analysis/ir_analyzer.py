@@ -618,7 +618,6 @@ def analyze(ll_path):
     for fn_name in sorted(thread_reachable):
         if fn_name not in all_functions:
             continue
-        fn_lines = all_functions[fn_name]
         var_idx_geps, field_stores, scalar_writes, _, _ = facts[fn_name]
 
         # H6 CHECK: VARIABLE-INDEX STORE INTO SHARED SCALAR ARRAY. NO STRUCT.
