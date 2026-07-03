@@ -125,11 +125,13 @@ it only because the buffers are globally visible and variable-index written.
 |---|---|
 | H1 on `%struct.GlobalMemory` ×2 + barrier `%struct.anon` (`lu_ncb`, both tiers) | Plausible-but-unconfirmed, unchanged from round 1: real contention candidates (`Global->id++` under lock, packed barrier struct), just not what Huron fixed. |
 | H1 on `%struct.LocalCopies` (`lu_ncb`, both tiers) | **Still FP.** The malloc is in `SlaveStart` but the pointer is passed to `lu()`, and the privacy check is intra-function only. Fix direction: interprocedural privacy (private-arg propagation). The corpus case `adv_tn_private_two_fields` proves the intra-function half works. |
-| H6 on `(pointer) i8 array` in `getnextline` (`string_match`, tier2 only) | FP vs ground truth: writes into the caller's line buffer; index is data-dependent, not tid-strided. |
+| H6 on `(pointer) i8 array` in `getnextline` (`string_match`, both tiers after the dedup-parity fix) | FP vs ground truth: writes into the caller's line buffer; index is data-dependent, not tid-strided. |
 
-Strict per-object precision: tier1 7/11 (0.64, was 0.29), tier2 7/12 (0.58, was
-0.25); counting the three plausible `lu_ncb` extras generously: tier1 10/11,
-tier2 10/12. The 1.00 in-house corpus scores remain regression gates, not
+Strict per-object precision: 7/12 (0.58) both tiers, was 0.29/0.25; counting
+the three plausible `lu_ncb` extras generously: 10/12. A post-review fix pass
+(token-boundary escape matching, `store atomic`/`llvm.memset` visibility,
+per-alias-group escape, per-fn H6 dedup parity, privacy in H2/H4) left all 22
+corpus cases and all 7 Huron hits unchanged. The 1.00 in-house corpus scores remain regression gates, not
 generalization claims — but the external gap has closed from 0.14 to 1.00
 recall on this suite.
 

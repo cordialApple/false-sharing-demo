@@ -12,6 +12,7 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
@@ -236,6 +237,10 @@ static bool hasStoreThrough(Value *root) {
       } else if (auto *CX = dyn_cast<AtomicCmpXchgInst>(u)) {
         if (CX->getPointerOperand() == v)
           return true;
+      } else if (auto *MI = dyn_cast<MemIntrinsic>(u)) {
+        // memset(&arr[tid],0,n) HAS NO StoreInst. DEST IS STILL A WRITE.
+        if (MI->getRawDest() == v)
+          return true;
       } else if (isa<GetElementPtrInst>(u) || isa<BitCastInst>(u) ||
                  isa<PHINode>(u) || isa<SelectInst>(u)) {
         wl.push_back(cast<Value>(u));
@@ -313,7 +318,9 @@ static bool isThreadPrivateAlloc(Value *base, Function *F) {
         return false;
       } else if (auto *CB2 = dyn_cast<CallBase>(u)) {
         Function *cal = CB2->getCalledFunction();
-        if (cal && cal->getName() == "pthread_create")
+        // UNKNOWN CALLEE (INDIRECT CALL) COULD BE pthread_create IN A HAT.
+        // NOT GUESS: NOT PRIVATE.
+        if (!cal || cal->getName() == "pthread_create")
           return false;
       } else if (isa<GetElementPtrInst>(u) || isa<BitCastInst>(u) ||
                  isa<PHINode>(u) || isa<SelectInst>(u)) {
@@ -412,6 +419,10 @@ static void runH2(FSContext &Ctx) {
           continue;
         // WRITE REQUIREMENT. READ-ONLY VAR-INDEX SCAN IS HARMLESS.
         if (!hasStoreThrough(GEP))
+          continue;
+        // SAME PRIVACY RULE AS H1/H6: THREAD-PRIVATE MALLOC'D ARRAY OF
+        // STRUCTS CANNOT FALSE-SHARE ACROSS THREADS.
+        if (isThreadPrivateAlloc(resolveBase(GEP->getPointerOperand()), F))
           continue;
         std::string key = structKey(gi.structTy);
         uint64_t sz = Ctx.DL.getStructLayout(gi.structTy)->getSizeInBytes();
@@ -646,7 +657,8 @@ static void runH4(FSContext &Ctx) {
         if (!GEP)
           continue;
         GepInfo gi = analyzeGep(cast<GEPOperator>(GEP));
-        if (gi.structTy && gi.variableArrayIndex && hasStoreThrough(GEP))
+        if (gi.structTy && gi.variableArrayIndex && hasStoreThrough(GEP) &&
+            !isThreadPrivateAlloc(resolveBase(GEP->getPointerOperand()), F))
           arrayStructs[structKey(gi.structTy)] = gi.structTy;
       }
     }

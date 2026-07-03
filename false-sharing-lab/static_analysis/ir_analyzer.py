@@ -259,7 +259,11 @@ def build_call_closure(start_fns, all_functions):
 
 
 # SCALAR LLVM TYPES FOR H6. ARRAY ELEMENT WITH NO STRUCT ANYWHERE.
-SCALAR_TYPES_RE = r'(?:i8|i16|i32|i64|i128|half|float|double|x86_fp80)'
+# DERIVED FROM BASE_TYPE_SIZES SO THE TWO LISTS CANNOT DRIFT. ptr EXCLUDED:
+# POINTER TABLES ARE A DIFFERENT BEAST. LONGEST-FIRST SO i128 BEATS i12+8.
+SCALAR_TYPES_RE = '(?:' + '|'.join(
+    sorted((t for t in BASE_TYPE_SIZES if t != 'ptr'), key=len, reverse=True)
+) + ')'
 
 
 def find_gep_accesses(fn_lines):
@@ -285,11 +289,11 @@ def find_gep_accesses(fn_lines):
     # SLOT AND RELOADED).
 
     var_idx_gep_re = re.compile(
-        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%\w+,\s*i64\s+%(\w+)'
+        r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+([%@][\w.]+),\s*i64\s+%(\w+)'
     )
     array_var_idx_gep_re = re.compile(
         r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+\[\d+\s+x\s+(%struct\.[\w.]+)\],'
-        r'\s*ptr\s+[@%][\w.]+,\s*i64\s+0,\s*i64\s+%(\w+)'
+        r'\s*ptr\s+([%@][\w.]+),\s*i64\s+0,\s*i64\s+%(\w+)'
     )
     field_gep_re = re.compile(
         r'%(\w+)\s*=\s*getelementptr\s+inbounds\s+(%struct\.[\w.]+),\s*ptr\s+%(\w+),\s*i32\s+0,\s*i32\s+(\d+)'
@@ -305,24 +309,32 @@ def find_gep_accesses(fn_lines):
 
     # STORE / LOAD / ALLOC BOOKKEEPING.
     # OPTIONAL volatile TOKEN. CLANG EMIT 'store volatile i64 ...' FOR VOLATILE FIELD.
-    store_re = re.compile(r'\bstore\b\s+(?:volatile\s+)?\S+\s+\S+,\s*ptr\s+%(\w+)')
-    # ATOMIC WRITES COUNT FOR THE H2/H6 WRITE REQUIREMENT (stats_array TAUGHT
-    # THIS: atomicrmw IS THE ONLY WRITE THERE). BUT NOT FOR H1 -- ATOMIC
-    # FIELDS BELONG TO H3, SAME SPLIT AS TIER 2.
+    # 'store atomic' IS A LEGAL PREFIX TOO (C11 atomic_store). REVIEW CAUGHT IT.
+    store_re = re.compile(r'\bstore\b\s+(?:atomic\s+)?(?:volatile\s+)?\S+\s+\S+,\s*ptr\s+%(\w+)')
+    # ATOMIC RMW WRITES COUNT FOR THE H2/H6 WRITE REQUIREMENT (stats_array
+    # TAUGHT THIS: atomicrmw IS THE ONLY WRITE THERE). BUT NOT FOR H1 --
+    # ATOMIC FIELDS BELONG TO H3, SAME SPLIT AS TIER 2.
     atomic_re = re.compile(
-        r'(?:\batomicrmw\b\s+(?:volatile\s+)?\w+\s+ptr\s+%(\w+)'
-        r'|\bcmpxchg\b\s+(?:volatile\s+)?ptr\s+%(\w+))'
+        r'\b(?:atomicrmw\s+(?:volatile\s+)?\w+|cmpxchg(?:\s+weak)?(?:\s+volatile)?)\s+ptr\s+%(\w+)'
     )
+    # llvm.memset/memcpy/memmove DEST IS A WRITE TOO. memset(&arr[tid],0,n)
+    # HAS NO store INSTRUCTION AT ALL.
+    mem_intr_re = re.compile(
+        r'@llvm\.mem(?:set|cpy|move)[\w.]*\(\s*ptr\s+(?:align\s+\d+\s+)?%(\w+)'
+    )
+    any_gep_re = re.compile(r'%(\w+)\s*=\s*getelementptr\b')
     ptr_store_re = re.compile(r'\bstore\b\s+(?:volatile\s+)?ptr\s+(%\w+|@[\w.]+),\s*ptr\s+([%@][\w.]+)')
     ptr_load_re = re.compile(r'%(\w+)\s*=\s*load\s+ptr,\s*ptr\s+([%@][\w.]+)')
     malloc_re = re.compile(r'%(\w+)\s*=\s*call\s+[^@]*ptr\s+@(?:malloc|calloc|aligned_alloc|realloc)\s*\(')
     ret_ptr_re = re.compile(r'\bret\s+ptr\s+%(\w+)')
 
-    var_geps = {}       # result_reg -> struct_name
+    var_geps = {}       # result_reg -> (struct_name, base_token)
     field_gep_map = {}  # result_reg -> (struct_name, field_idx, base_reg)
     scalar_geps = {}    # result_reg -> (elem_type, base_token)
+    all_gep_regs = set()
     stored_registers = set()
     atomic_targets = set()
+    mem_targets = set()
     ptr_stores = []     # (value_token, target_token)
     ptr_loads = []      # (result_reg, slot_token)
     malloc_regs = set()
@@ -330,9 +342,12 @@ def find_gep_accesses(fn_lines):
     pthread_lines = []
 
     for line in fn_lines:
+        mG = any_gep_re.search(line)
+        if mG:
+            all_gep_regs.add(mG.group(1))
         m = var_idx_gep_re.search(line) or array_var_idx_gep_re.search(line)
         if m:
-            var_geps[m.group(1)] = m.group(2)
+            var_geps[m.group(1)] = (m.group(2), m.group(3))
             continue
         m2 = field_gep_re.search(line)
         if m2:
@@ -342,8 +357,14 @@ def find_gep_accesses(fn_lines):
         if m6:
             scalar_geps[m6.group(1)] = (m6.group(2), m6.group(3))
             continue
+        if mG:
+            continue
         if '@pthread_create' in line:
             pthread_lines.append(line)
+        mI = mem_intr_re.search(line)
+        if mI:
+            mem_targets.add(mI.group(1))
+            continue
         mM = malloc_re.search(line)
         if mM:
             malloc_regs.add(mM.group(1))
@@ -359,32 +380,49 @@ def find_gep_accesses(fn_lines):
             stored_registers.add(m3.group(1))
         mA = atomic_re.search(line)
         if mA:
-            atomic_targets.add(next(g for g in mA.groups() if g))
+            atomic_targets.add(mA.group(1))
         mL = ptr_load_re.search(line)
         if mL:
             ptr_loads.append((mL.group(1), mL.group(2)))
 
-    gep_result_regs = set(var_geps) | set(field_gep_map) | set(scalar_geps)
+    # ANY GEP RESULT COUNTS FOR SLOT LEGALITY, NOT JUST THE TRACKED SHAPES.
+    # REVIEW CAUGHT: store INTO AN UNTRACKED GEP (ptr TABLE SLOT) LOOKED
+    # LIKE A PLAIN LOCAL SLOT AND KEPT THE POINTER "PRIVATE".
+    gep_result_regs = all_gep_regs
+
+    def is_plain_slot(tok):
+        return not tok.startswith('@') and tok.lstrip('%') not in gep_result_regs
+
+    loads_by_slot = {}
+    for res, slot in ptr_loads:
+        loads_by_slot.setdefault(slot, []).append(res)
+    vals_by_slot = {}
+    for val, slot in ptr_stores:
+        if is_plain_slot(slot) and val.startswith('%'):
+            vals_by_slot.setdefault(slot, []).append(val.lstrip('%'))
 
     # POINTER-VALUE FLOW EDGES. -O0 PARKS POINTERS IN ALLOCA SLOTS:
     # store ptr %v, ptr %slot ... %w = load ptr, ptr %slot  =>  %v FLOWS TO %w.
-    # SLOT MUST BE A PLAIN LOCAL (NOT A GEP RESULT, NOT A GLOBAL) OR THE
-    # POINTER JUST ESCAPED INTO SHARED MEMORY INSTEAD.
     flow = {}
-    for val, slot in ptr_stores:
-        if slot.startswith('@') or slot.lstrip('%') in gep_result_regs:
-            continue
-        if not val.startswith('%'):
-            continue
-        for res, lslot in ptr_loads:
-            if lslot == slot:
-                flow.setdefault(val.lstrip('%'), set()).add(res)
+    for slot, vals in vals_by_slot.items():
+        for v in vals:
+            flow.setdefault(v, set()).update(loads_by_slot.get(slot, ()))
 
-    write_targets = stored_registers | atomic_targets
+    write_targets = stored_registers | atomic_targets | mem_targets
+
+    # DERIVED-POINTER ADJACENCY BUILT ONCE. BFS IS O(EDGES), NOT O(GEPS^2).
+    children = {}
+    for fres, (_, _, fbase) in field_gep_map.items():
+        children.setdefault(fbase, []).append(fres)
+    for sres, (_, sbase) in scalar_geps.items():
+        if sbase.startswith('%'):
+            children.setdefault(sbase.lstrip('%'), []).append(sres)
+    for v, outs in flow.items():
+        children.setdefault(v, []).extend(outs)
 
     def written_through(root_reg):
-        # BFS: ROOT GEP -> DERIVED FIELD GEPS -> SLOT-RELOADED COPIES.
-        # TRUE IF ANY NODE IS A STORE OR ATOMIC-WRITE TARGET.
+        # BFS: ROOT GEP -> DERIVED GEPS -> SLOT-RELOADED COPIES.
+        # TRUE IF ANY NODE IS A STORE / ATOMIC / MEM-INTRINSIC TARGET.
         seen = set()
         queue = [root_reg]
         while queue:
@@ -394,13 +432,7 @@ def find_gep_accesses(fn_lines):
             seen.add(r)
             if r in write_targets:
                 return True
-            for fres, (_, _, fbase) in field_gep_map.items():
-                if fbase == r:
-                    queue.append(fres)
-            for sres, (_, sbase) in scalar_geps.items():
-                if sbase == '%' + r:
-                    queue.append(sres)
-            queue.extend(flow.get(r, ()))
+            queue.extend(children.get(r, ()))
         return False
 
     # INSTANCE PRIVACY (HURON lu_ncb LocalCopies LESSON): POINTER BORN FROM
@@ -410,29 +442,48 @@ def find_gep_accesses(fn_lines):
     private = set(malloc_regs)
     while True:
         grown = set(private)
-        for val, slot in ptr_stores:
-            v = val.lstrip('%')
-            if v in private and not slot.startswith('@') and slot.lstrip('%') not in gep_result_regs:
-                slot_vals = [x.lstrip('%') for x, s in ptr_stores if s == slot]
-                if all(x in private for x in slot_vals):
-                    for res, lslot in ptr_loads:
-                        if lslot == slot:
-                            grown.add(res)
+        for slot, vals in vals_by_slot.items():
+            if vals and all(v in private for v in vals):
+                grown.update(loads_by_slot.get(slot, ()))
         if grown == private:
             break
         private = grown
-    escaped = ret_regs & private
-    for val, slot in ptr_stores:
-        if val.lstrip('%') in private and (slot.startswith('@') or slot.lstrip('%') in gep_result_regs):
-            escaped.add(val.lstrip('%'))
-    for line in pthread_lines:
-        if any(('%' + p) in line for p in private):
-            escaped = private
-            break
-    if escaped:
-        private = set()
 
-    variable_index_geps = [s for reg, s in var_geps.items() if written_through(reg)]
+    # ESCAPE IS PER ALIAS GROUP, NOT A WHOLESALE WIPE. REVIEW CAUGHT: ONE
+    # RETURNED malloc MUST NOT UN-PRIVATIZE AN UNRELATED SCRATCH malloc.
+    escape_seeds = set(ret_regs & private)
+    for val, slot in ptr_stores:
+        v = val.lstrip('%')
+        if v in private and not is_plain_slot(slot):
+            escape_seeds.add(v)
+    for line in pthread_lines:
+        # TOKEN-BOUNDARY MATCH. SUBSTRING '%1' IN '%10' BURNED US.
+        for p in private:
+            if re.search(r'%' + re.escape(p) + r'\b', line):
+                escape_seeds.add(p)
+    # CLOSURE OVER SLOT ALIASING: ESCAPED VALUE TAINTS ITS RELOADS AND
+    # SLOT-MATES. OVERAPPROXIMATE = CONSERVATIVE (LESS PRIVACY, NEVER MORE).
+    tainted = set()
+    queue = list(escape_seeds)
+    while queue:
+        r = queue.pop()
+        if r in tainted:
+            continue
+        tainted.add(r)
+        for slot, vals in vals_by_slot.items():
+            if r in vals:
+                queue.extend(vals)
+                queue.extend(loads_by_slot.get(slot, ()))
+        for res, slot in ptr_loads:
+            if res == r:
+                queue.extend(vals_by_slot.get(slot, ()))
+                queue.extend(loads_by_slot.get(slot, ()))
+    private -= tainted
+
+    variable_index_geps = [
+        s for reg, (s, base) in var_geps.items()
+        if written_through(reg) and base.lstrip('%') not in private
+    ]
     field_stores = [
         (s, fi) for reg, (s, fi, base) in field_gep_map.items()
         if reg in stored_registers and base not in private
@@ -491,7 +542,9 @@ def analyze(ll_path):
             if elem_size <= 0:
                 continue
             base_label = base if base.startswith('@') else '(pointer)'
-            key = (base_label, elem_type)
+            # KEY INCLUDES fn: TWO THREAD FNS HAMMERING ARRAYS BOTH REPORT.
+            # SAME DEDUP SHAPE AS TIER 2. REVIEW CAUGHT THE DIVERGENCE.
+            key = (fn_name, base_label, elem_type)
             if key in h6_flagged:
                 continue
             h6_flagged.add(key)
