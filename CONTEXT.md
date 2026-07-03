@@ -11,7 +11,9 @@ _Last updated: 2026-07-03 · branch: h6-round · session: H6 + FP fixes DONE, Hu
 - Remaining known issues: H1 LocalCopies FP persists (malloc in SlaveStart, pointer passed to lu() — privacy is intra-function only; fix = interprocedural private-arg propagation); tier2 H6 FP on string_match getnextline (data-dependent index); H7 boundary heuristic would make the histogram hit mechanically correct.
 - PR #4 (h6-round) opened after 8-angle /code-review + fixes (`2cafa3a`).
 - Branch `h7-round` (stacked on h6-round): adopted Gemini implementation_plan.md phases 1/4/6a — H7 boundary heuristic (histogram now FULL hit on thread_arg_t both tiers), lock-call write modeling (mutex_data_same_line GAP -> PASS both tiers; locked_toy mutex-array H2 restored), tier1 %union parsing, parametrized line size (tier1 --line-size, tier2 FS_CACHE_LINE_BYTES). Corpus 23 cases, both tiers 0FP/0FN exit 0, Huron recall stays 7/7. Deferred Gemini phases 2/3/5/6b/7 recorded in WORKPLAN round 5.
-- NEXT: merge PR #4 then PR #5, then interprocedural H1 privacy (LocalCopies FP) or Gemini phase 2 (allocator modeling H8).
+- PRs #4/#5/#6 merged (NOTE: #5 stranded on h6-round like #2 did; #6 carried it to main — suggest enabling auto-delete-head-branches on GitHub to stop this recurring).
+- Branch `interproc-privacy`: Gemini phase 5 first slice — argument privacy (address-never-taken + all-call-sites-private, recursive). LocalCopies FP GONE both tiers, lreg_args TP intact, corpus 24 cases 0FP/0FN. Only confirmed FP left on Huron: getnextline i8 (data-dependent index).
+- NEXT: merge interproc-privacy PR, then Gemini phase 2 (allocator-adjacency modeling "H8") or tier1 H3/H5.
 
 ## 1. What changed this session
 - Built `false-sharing-lab/static_analysis/`: two-tier static false-sharing detection lab. tier1 = `ir_analyzer.py` (pure-Python textual IR analysis, H1/H2/H4); tier2 = `tier2_pass/FalseSharingPass.cpp` (out-of-tree LLVM 18 new-PM plugin, H1–H5, exact DataLayout, works at -O1) + `tier2_analyzer.py` wrapper (identical CLI/JSON contract).

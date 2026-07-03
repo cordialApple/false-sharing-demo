@@ -161,6 +161,28 @@ hit (allocator adjacency is statically invisible; H6 catches the right
 buffers for a related-but-different reason). Extras unchanged from round 2
 plus the restored mutex-array finding (plausible, not in Huron's fix).
 
+## Round 4 — interprocedural instance privacy (2026-07-03, branch `interproc-privacy`)
+
+Gemini roadmap phase 5, first slice (module-local, no LTO): a function
+argument is thread-private when the callee's address is never taken and
+**every** call site passes a value that is itself thread-private in its
+caller (recursive, depth-capped). Tier1 implements this as a module-level
+fixpoint seeding per-function privacy with proven-private parameters; tier2
+recurses through `Argument` bases over direct call sites.
+
+- **`LocalCopies` FP eliminated in both tiers** — the malloc in `SlaveStart`
+  passed down through `lu()`/`OneSolve()` now resolves as private. This was
+  the last confirmed FP from round 1.
+- `lreg_args` TP intact: thread-entry parameters are address-taken via
+  `pthread_create`, so they can never be argued private. All 7 hits stand.
+- Corpus: 24 cases (new `adv_tn_private_via_helper` regression test), both
+  tiers 0 FP / 0 FN, exit 0.
+
+Remaining extras on the suite: three plausible `lu_ncb` findings
+(`GlobalMemory` ×2, barrier `anon`), the plausible `locked` mutex-array H2,
+and one FP (`getnextline` i8 buffer, data-dependent index) — the only
+confirmed false positive left across the seven programs.
+
 ## Reproduce
 
 ```sh

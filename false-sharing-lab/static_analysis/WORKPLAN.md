@@ -116,6 +116,26 @@ phases 1, 4, 6a; deferred 2 (allocator modeling), 3 (SCEV symbolic offsets),
 Huron: histogram upgraded to a full HIT (H7 on thread_arg_t, both tiers);
 locked_toy mutex-array H2 restored in both tiers. Recall stays 7/7.
 
+## Round 6 — interprocedural privacy (2026-07-03)
+
+Gemini roadmap phase 5, first slice (module-local, no LTO):
+
+| Phase | Task | Status |
+|---|---|---|
+| 23. Tier2 argument privacy | escapesLocally() split out; isPrivateBase() recurses through Argument bases: address never taken + every call site passes a private value (depth-capped) | DONE |
+| 24. Tier1 fixpoint | Per-function privacy seeded with proven-private params; module fixpoint over call sites; address-taken fns (thread entries, fn-ptr args) excluded | DONE |
+| 25. Corpus regression | adv_tn_private_via_helper (malloc in thread fn, writes via static helper) | DONE |
+
+### Round-6 scores (24 cases, exit 0)
+
+| Analyzer | TP | FP | FN | GAP | Precision | Recall |
+|---|---|---|---|---|---|---|
+| tier1 | 9 | 0 | 0 | 4 | 1.00 | 1.00 |
+| tier2 | 11 | 0 | 0 | 2 | 1.00 | 1.00 |
+
+Huron: LocalCopies FP gone both tiers (last confirmed FP from round 1);
+all 7 hits intact. Remaining suite extras: 4 plausible + 1 FP (getnextline).
+
 ## Architecture (mirrors c_benchmark + agent workflow)
 
 ```
