@@ -1,0 +1,178 @@
+{
+  "cases": [
+    {
+      "file": "basic/tp_h2_tid_array.c",
+      "expected": [
+        {
+          "heuristic": "H2",
+          "struct_contains": "tid_counter",
+          "severity": "HIGH"
+        }
+      ],
+      "known_limitation": false,
+      "notes": "Classic anti-pattern: single worker fn, tid-indexed array, struct size 8B < 64B. Tier-1 H2 must detect."
+    },
+    {
+      "file": "basic/tn_h2_padded_array.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "Manual char padding[56] makes struct 64B. H2 size < 64 check fails. H4 sz%64==0 check also clean."
+    },
+    {
+      "file": "basic/tn_h2_aligned_attr.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "__attribute__((aligned(64))) causes clang to emit { i64, [56 x i8] } in LLVM IR, making struct size 64B. Both H2 and H4 must stay quiet."
+    },
+    {
+      "file": "basic/tp_h1_hot_fields.c",
+      "expected": [
+        {
+          "heuristic": "H1",
+          "struct_contains": "hot_fields",
+          "severity": "MEDIUM"
+        }
+      ],
+      "known_limitation": false,
+      "notes": "Single struct instance, two separate thread entry fns each writing a different field. Both fields at offsets 0 and 8 (bucket 0). H1 must detect."
+    },
+    {
+      "file": "basic/tn_h1_separate_lines.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "Fields a (offset 0, bucket 0) and b (offset 64, bucket 1) pushed to different cache lines via char pad[56]. H1 per-bucket unique_fields < 2."
+    },
+    {
+      "file": "basic/tp_h3_adjacent_atomics.c",
+      "expected": [
+        {
+          "heuristic": "H3",
+          "struct_contains": "atomic_pair",
+          "severity": "HIGH"
+        }
+      ],
+      "known_limitation": true,
+      "notes": "Adjacent _Atomic long fields in same struct, different threads. Tier-2 fires H3/HIGH (severity matches label now; was mislabeled MEDIUM). H3 is a known Tier-1 gap: atomicrmw not matched, H3 not implemented there."
+    },
+    {
+      "file": "basic/tp_h5_adjacent_globals.c",
+      "expected": [
+        {
+          "heuristic": "H5",
+          "struct_contains": null,
+          "severity": "MEDIUM"
+        }
+      ],
+      "known_limitation": true,
+      "notes": "Two adjacent global longs, different threads. H5 requires linker map. Also: store to @global not matched by store_re (needs %reg). Known Tier-1 gap. Verdict will be MISS."
+    },
+    {
+      "file": "basic/tn_single_thread.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "Variable-index array access but NO pthread_create. H2 correctly skips (no thread-reachable fns). H4 also stays quiet: both tiers guard H4 on thread reachability (guard added after this case exposed FPs in round 1)."
+    },
+    {
+      "file": "basic/tn_readonly_sharing.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "Threads read adjacent long values via plain ptr, no struct GEPs in thread fn. No store to shared mem. H1/H2/H4 all quiet. Demonstrates readers do not trigger false-sharing heuristics."
+    },
+    {
+      "file": "basic/edge_fnptr_entry.c",
+      "expected": [
+        {
+          "heuristic": "H2",
+          "struct_contains": "tiny",
+          "severity": "HIGH"
+        }
+      ],
+      "known_limitation": true,
+      "notes": "pthread_create called with fn loaded into a variable. IR has ptr %fn_var (register), not ptr @worker (literal). Analyzer pthread_re cannot extract entry name. thread_entries=[]. H2 missed (GAP). H4 may fire as side-effect of H4 no-thread-context weakness."
+    },
+    {
+      "file": "advanced/adv_tp_mutex_data_same_line.c",
+      "expected": [
+        {
+          "heuristic": "H1",
+          "struct_contains": "mutex_counter_t",
+          "severity": "MEDIUM"
+        }
+      ],
+      "known_limitation": true,
+      "notes": "Both tiers MISS. Tier2 correctly resolves struct layout (m at offset 0/size 40, counter at offset 40/size 8, total 48B). H1 requires >=2 fields directly GEP-stored in thread fns. In -O0 IR, pthread_mutex_lock(&p->m) is an opaque call; only p->counter is written via explicit GEP store. Analyzer sees only 1 thread-written field per struct. GAP: opaque-call side-effects on struct fields are invisible to static GEP analysis."
+    },
+    {
+      "file": "advanced/adv_tp_ring_head_tail.c",
+      "expected": [
+        {
+          "heuristic": "H1",
+          "struct_contains": "spsc_ring_t",
+          "severity": "MEDIUM"
+        }
+      ],
+      "known_limitation": false,
+      "notes": "SPSC ring: head at offset 0 (producer), tail at offset 8 (consumer). Both in bucket 0. H1 fires on both tier1 and tier2. Classic LMAX Disruptor anti-pattern."
+    },
+    {
+      "file": "advanced/adv_tp_stats_array.c",
+      "expected": [
+        {
+          "heuristic": "H2",
+          "struct_contains": "stat_t",
+          "severity": "HIGH"
+        }
+      ],
+      "known_limitation": false,
+      "notes": "lshaz TrackingStatistic pattern. stat_t is 16B, 4 per cache line, tid-indexed. Initially mislabeled as atomicrmw gap; real root cause was GEP shape: global fixed array emits 'getelementptr [4 x %struct.stat_t], ptr @stats, i64 0, i64 %var' (ArrayType source, not StructType). H2 fixed in both tiers to handle array-of-struct GEPs. Scalar arrays ([8 x i64]) deliberately excluded (H6 territory)."
+    },
+    {
+      "file": "advanced/adv_tp_nested_inner_fields.c",
+      "expected": [
+        {
+          "heuristic": "H1",
+          "struct_contains": "outer",
+          "severity": "MEDIUM"
+        }
+      ],
+      "known_limitation": true,
+      "notes": "Both tiers MISS. Thread A writes o->x (offset 0 in outer), Thread B writes o->in.b (absolute offset 16). H1 traverses top-level struct fields; nested GEP chain for o->in.b is attributed to struct inner, not outer. Cross-struct field attribution via nested GEP resolution is not implemented. GAP: multi-level nested struct field access not resolved to parent struct bucket."
+    },
+    {
+      "file": "advanced/adv_tp_deceptive_padding.c",
+      "expected": [
+        {
+          "heuristic": "H2",
+          "struct_contains": "deceptive_t",
+          "severity": "HIGH"
+        }
+      ],
+      "known_limitation": false,
+      "notes": "Struct has pad[16] field that looks like padding but total is only 24B (< 64B). H2 fires on both tiers (24B < 64B, tid-indexed array). 2 elements per cache line. Validates that H2 is not fooled by undersized padding fields."
+    },
+    {
+      "file": "advanced/adv_tn_malloc_per_thread.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "Each thread mallocs its own private_t (8B struct) inside the thread fn. No global, no shared struct. Both tiers correctly emit no findings. Heap allocation inside thread fn is not visible as cross-thread shared memory. True negative confirmed."
+    },
+    {
+      "file": "advanced/adv_tn_alignas_atomics.c",
+      "expected": [],
+      "known_limitation": false,
+      "notes": "_Alignas(64) on each field causes clang to emit padding bytes: aligned_pair = { i64, [56 x i8], i64, [56 x i8] }, size 128B. Field a at offset 0 (bucket 0), field b at offset 64 (bucket 1). H1 correctly sees different buckets and emits no finding. Both tiers clean. Offset math precision test passed."
+    },
+    {
+      "file": "advanced/adv_tp_global_scalar_array.c",
+      "expected": [
+        {
+          "heuristic": "H6",
+          "struct_contains": null,
+          "severity": "MEDIUM"
+        }
+      ],
+      "known_limitation": true,
+      "notes": "Both tiers MISS. Plain global long counters[8], no struct. Thread i writes counters[tid]++. 8 longs = 64B, all on one cache line. H2 is struct-typed; H5 requires distinct global symbols. Neither covers variable-index stores into global scalar arrays. H6 candidate: variable-index store into global scalar array where element size < 64B. Next heuristic to implement."
+    }
+  ]
+}
