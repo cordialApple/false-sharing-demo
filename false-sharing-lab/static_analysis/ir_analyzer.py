@@ -554,8 +554,23 @@ def analyze(ll_path):
     # PRIVATE THERE. FIXPOINT: CALLEE PARAM IS PRIVATE IFF EVERY CALL SITE
     # PASSES A PRIVATE VALUE AND THE CALLEE'S ADDRESS IS NEVER TAKEN.
     param_re = re.compile(r'^define\s+[^(]*@\w+\s*\(([^)]*)\)')
-    call_site_re = re.compile(r'\bcall\b[^@]*@(\w+)\((.*)\)')
+    callee_open_re = re.compile(r'\b(?:call|invoke)\b[^@(]*@(\w+)\s*\(')
     arg_reg_re = re.compile(r'%([\w.]+)\s*$')
+
+    def direct_call_sites(line):
+        # DEPTH-MATCHED CLOSE PAREN: KEEPS invoke's 'to label ... unwind
+        # label ...' TAIL AND TRAILING ATTRS OUT OF THE ARG LIST.
+        for m in callee_open_re.finditer(line):
+            depth = 1
+            i = m.end()
+            while i < len(line) and depth > 0:
+                if line[i] in '([{':
+                    depth += 1
+                elif line[i] in ')]}':
+                    depth -= 1
+                i += 1
+            yield m.group(1), line[m.end():i - 1], m.span(1)
+
     fn_params = {}
     for fn, fl in all_functions.items():
         m = param_re.match(fl[0])
@@ -566,37 +581,101 @@ def analyze(ll_path):
             for t in toks
         ]
 
-    # ADDRESS-TAKEN FUNCTIONS: THREAD ENTRIES, OR NAME PASSED AS AN ARG
-    # SOMEWHERE. THEIR PARAMS ARRIVE FROM OUTSIDE THE VISIBLE CALL SITES.
+    # ADDRESS-TAKEN = @name ANYWHERE OUTSIDE ITS OWN define/declare LINE AND
+    # OUTSIDE THE CALLEE SLOT OF A DIRECT call/invoke: STORES, GLOBAL
+    # INITIALIZERS (FN-POINTER TABLES), CALL ARGS. SUCH FUNCTIONS CAN BE
+    # INVOKED INDIRECTLY = CALL SITES WE CANNOT SEE = PARAMS NEVER PRIVATE.
     addr_taken = set(entry_fn_names)
-    for fn, fl in all_functions.items():
-        for line in fl:
-            cm = call_site_re.search(line)
-            if not cm:
-                continue
-            for tok in split_type_list(cm.group(2)):
-                am = re.search(r'@(\w+)', tok)
-                if am:
-                    addr_taken.add(am.group(1))
+    def_line_re = re.compile(r'^(?:define|declare)\b[^(]*?@(\w+)\s*\(')
+    at_tok_re = re.compile(r'@(\w+)')
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith(';'):
+            continue
+        skip_spans = set()
+        dm = def_line_re.match(line)
+        if dm:
+            skip_spans.add(dm.span(1))
+        for _, _, span in direct_call_sites(line):
+            skip_spans.add(span)
+        for nm in at_tok_re.finditer(line):
+            if nm.span(1) not in skip_spans and nm.group(1) in all_functions:
+                addr_taken.add(nm.group(1))
 
+    # PER-FUNCTION POINTER PARENT EDGES: GEP RESULT -> BASE, BITCAST -> SRC,
+    # RELOAD OF A PLAIN ALLOCA SLOT -> ALL VALUES PARKED THERE. LETS THE
+    # CALL-SITE VOTE SEE &priv->inner AS PRIVATE, NOT JUST %priv ITSELF.
+    gep_parent_re = re.compile(r'%([\w.]+)\s*=\s*getelementptr\s.*?,\s*ptr\s+([%@][\w.]+)')
+    bitcast_re = re.compile(r'%([\w.]+)\s*=\s*bitcast\s+\S+\s+([%@][\w.]+)')
+    any_gep_res_re = re.compile(r'%([\w.]+)\s*=\s*getelementptr\b')
+    load_ptr_re = re.compile(r'%([\w.]+)\s*=\s*load\s+ptr,\s*ptr\s+%([\w.]+)')
+    store_ptr_re = re.compile(r'\bstore\b\s+(?:volatile\s+)?ptr\s+([%@][\w.]+),\s*ptr\s+%([\w.]+)')
+
+    def build_parent_map(fl):
+        parents = {}
+        slot_vals = {}
+        gep_res = set()
+        reloads = []
+        for line in fl:
+            g = any_gep_res_re.search(line)
+            if g:
+                gep_res.add(g.group(1))
+                gp = gep_parent_re.search(line)
+                if gp:
+                    parents[gp.group(1)] = [gp.group(2).lstrip('%')]
+                continue
+            b = bitcast_re.search(line)
+            if b:
+                parents[b.group(1)] = [b.group(2).lstrip('%')]
+                continue
+            s = store_ptr_re.search(line)
+            if s:
+                slot_vals.setdefault(s.group(2), []).append(s.group(1).lstrip('%'))
+            ld = load_ptr_re.search(line)
+            if ld:
+                reloads.append((ld.group(1), ld.group(2)))
+        for res, slot in reloads:
+            if slot not in gep_res and slot_vals.get(slot):
+                parents[res] = list(slot_vals[slot])
+        return parents
+
+    def resolves_private(reg, priv, parents):
+        memo = {}
+
+        def go(r, stack):
+            if r in priv:
+                return True
+            if r in memo:
+                return memo[r]
+            ps = parents.get(r)
+            if not ps or r in stack:
+                return False
+            stack.add(r)
+            ok = all(go(p, stack) for p in ps)
+            stack.discard(r)
+            memo[r] = ok
+            return ok
+
+        return go(reg, set())
+
+    parent_maps = {fn: build_parent_map(fl) for fn, fl in all_functions.items()}
     private_params = {fn: frozenset() for fn in all_functions}
-    facts = {}
-    for _ in range(4):
-        for fn, fl in all_functions.items():
-            facts[fn] = find_gep_accesses(fl, private_params[fn])
+    facts = {fn: find_gep_accesses(fl, private_params[fn])
+             for fn, fl in all_functions.items()}
+    for _ in range(len(all_functions) + 1):
         votes = {}
         for fn, fl in all_functions.items():
             priv = facts[fn][4]
             for line in fl:
-                cm = call_site_re.search(line)
-                if not cm or cm.group(1) not in all_functions:
-                    continue
-                callee = cm.group(1)
-                for k, tok in enumerate(split_type_list(cm.group(2))):
-                    rm = arg_reg_re.search(tok.strip())
-                    is_priv = bool(rm) and rm.group(1) in priv
-                    ok, n = votes.get((callee, k), (True, 0))
-                    votes[(callee, k)] = (ok and is_priv, n + 1)
+                for callee, arg_body, _ in direct_call_sites(line):
+                    if callee not in all_functions:
+                        continue
+                    for k, tok in enumerate(split_type_list(arg_body)):
+                        rm = arg_reg_re.search(tok.strip())
+                        is_priv = bool(rm) and resolves_private(
+                            rm.group(1), priv, parent_maps[fn])
+                        ok, n = votes.get((callee, k), (True, 0))
+                        votes[(callee, k)] = (ok and is_priv, n + 1)
         new_map = {fn: set() for fn in all_functions}
         for (callee, k), (ok, n) in votes.items():
             if ok and n > 0 and callee not in addr_taken:
@@ -607,6 +686,10 @@ def analyze(ll_path):
         if new_map == private_params:
             break
         private_params = new_map
+        # FACTS RECOMPUTED AFTER EVERY UPDATE: NEVER STALE, EVEN IF THE
+        # ITERATION CAP EXHAUSTS BEFORE CONVERGENCE.
+        facts = {fn: find_gep_accesses(fl, private_params[fn])
+                 for fn, fl in all_functions.items()}
 
     findings = []
     h2_flagged_structs = set()     # STRUCTS ALREADY GOT H2. NO DOUBLE FLAG.

@@ -307,7 +307,10 @@ static bool isAllocFnName(StringRef n) {
 // NOT CROSS A THREAD BOUNDARY; THE CALLEE'S USE IS JUDGED VIA ARGUMENT
 // PRIVACY BELOW.
 // ------------------------------------------------------------------------
-static bool escapesLocally(Value *root) {
+static bool escapesLocally(Value *root, SmallPtrSetImpl<const Argument *> &inFlight,
+                           int depth) {
+  if (depth > 6)
+    return true;
   SmallPtrSet<Value *, 16> seen;
   SmallVector<Value *, 16> wl{root};
   while (!wl.empty()) {
@@ -333,6 +336,26 @@ static bool escapesLocally(Value *root) {
         // NOT GUESS: ESCAPED.
         if (!cal || cal->getName() == "pthread_create")
           return true;
+        if (isAllocFnName(cal->getName()) || cal->getName() == "free")
+          continue;
+        if (cal->isDeclaration())
+          return true;
+        if (CB2->getCalledOperand() == v)
+          return true;
+        for (unsigned i = 0, e = CB2->arg_size(); i != e; ++i) {
+          if (CB2->getArgOperand(i) != v)
+            continue;
+          if (i >= cal->arg_size())
+            return true;
+          Argument *P = cal->getArg(i);
+          // CYCLE ON THE RECURSION PATH ADDS NO NEW ESCAPE EVIDENCE.
+          if (!inFlight.insert(P).second)
+            continue;
+          bool esc = escapesLocally(P, inFlight, depth + 1);
+          inFlight.erase(P);
+          if (esc)
+            return true;
+        }
       } else if (isa<GetElementPtrInst>(u) || isa<BitCastInst>(u) ||
                  isa<PHINode>(u) || isa<SelectInst>(u)) {
         wl.push_back(cast<Value>(u));
@@ -340,6 +363,11 @@ static bool escapesLocally(Value *root) {
     }
   }
   return false;
+}
+
+static bool escapesLocally(Value *root) {
+  SmallPtrSet<const Argument *, 8> inFlight;
+  return escapesLocally(root, inFlight, 0);
 }
 
 // ------------------------------------------------------------------------
@@ -352,7 +380,8 @@ static bool escapesLocally(Value *root) {
 //     (RECURSIVE, DEPTH-CAPPED). CLOSES THE LocalCopies FP WHERE THE
 //     PRIVATE POINTER IS PASSED DOWN THROUGH lu()/OneSolve() HELPERS.
 // ------------------------------------------------------------------------
-static bool isPrivateBase(Value *base, Function *F, int depth) {
+static bool isPrivateBase(Value *base, Function *F, int depth,
+                          SmallPtrSetImpl<const Argument *> &visiting) {
   if (depth > 6)
     return false;
   if (auto *CB = dyn_cast<CallBase>(base)) {
@@ -366,25 +395,35 @@ static bool isPrivateBase(Value *base, Function *F, int depth) {
   if (auto *A = dyn_cast<Argument>(base)) {
     if (A->getParent() != F)
       return false;
-    bool anyCall = false;
-    for (User *u : F->users()) {
-      auto *CB = dyn_cast<CallBase>(u);
-      if (!CB || CB->getCalledFunction() != F)
-        return false; // ADDRESS TAKEN (E.G. THREAD ENTRY). NOT PRIVATE.
-      if (A->getArgNo() >= CB->arg_size())
-        return false;
-      anyCall = true;
-      Value *passed = CB->getArgOperand(A->getArgNo());
-      if (!isPrivateBase(resolveBase(passed), CB->getFunction(), depth + 1))
-        return false;
-    }
-    return anyCall && !escapesLocally(A);
+    // CYCLE (RECURSIVE HELPER) ADDS NO SHARING BY ITSELF: RESOLVE PRIVATE,
+    // OTHER CALL SITES STILL JUDGED ON THEIR OWN.
+    if (!visiting.insert(A).second)
+      return true;
+    bool priv = [&] {
+      bool anyCall = false;
+      for (const Use &U : F->uses()) {
+        auto *CB = dyn_cast<CallBase>(U.getUser());
+        if (!CB || !CB->isCallee(&U))
+          return false; // ADDRESS TAKEN (E.G. THREAD ENTRY). NOT PRIVATE.
+        if (A->getArgNo() >= CB->arg_size())
+          return false;
+        anyCall = true;
+        Value *passed = CB->getArgOperand(A->getArgNo());
+        if (!isPrivateBase(resolveBase(passed), CB->getFunction(), depth + 1,
+                           visiting))
+          return false;
+      }
+      return anyCall && !escapesLocally(A);
+    }();
+    visiting.erase(A);
+    return priv;
   }
   return false;
 }
 
 static bool isThreadPrivateAlloc(Value *base, Function *F) {
-  return isPrivateBase(base, F, 0);
+  SmallPtrSet<const Argument *, 8> visiting;
+  return isPrivateBase(base, F, 0, visiting);
 }
 
 // ========================================================================
