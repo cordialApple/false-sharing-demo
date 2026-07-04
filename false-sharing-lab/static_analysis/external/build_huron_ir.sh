@@ -15,7 +15,9 @@ fi
 mkdir -p "$OUT"
 cd "$HURON/test_suites"
 
-CFLAGS="-O0 -g -pthread -S -emit-llvm"
+. "$SCRIPT_DIR/ir_flags.sh"
+# NO -std PIN. STRICT c11 HIDE srand48/lrand48 IN lu.c. DEFAULT gnu17 FINE.
+CFLAGS="$IR_BASEFLAGS"
 
 clang-18 $CFLAGS false/false.c                                 -o "$OUT/false.ll"
 clang-18 $CFLAGS histogram/hist-pthread.c                      -o "$OUT/histogram.ll"

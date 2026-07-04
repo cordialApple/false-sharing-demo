@@ -345,3 +345,12 @@ sh false-sharing-lab/static_analysis/external/build_huron_ir.sh
 python ir_analyzer.py external/huron_ir/<prog>.ll --json
 python tier2_analyzer.py external/huron_ir/<prog>.ll --json
 ```
+
+PARSEC round:
+
+```sh
+# in WSL, from repo root
+sh false-sharing-lab/static_analysis/external/build_parsec_ir.sh
+# then, from false-sharing-lab/static_analysis/
+python scan.py external/parsec_ir --out results/scan_parsec.md --json
+```

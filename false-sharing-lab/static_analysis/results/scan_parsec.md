@@ -1,6 +1,6 @@
 # Scan Report — external programs (no ground truth)
 
-Target: `C:\Users\randl\Documents\Antigravity\false-sharing-demo\false-sharing-lab\static_analysis\external\parsec_ir`
+Target: `external/parsec_ir`
 Analyzers: tier1, tier2
 Programs scanned: 3
 
@@ -83,6 +83,6 @@ Programs scanned: 3
 
 | Program | Agreed (all analyzers) | Tier-unique |
 |---------|------------------------|-------------|
-| canneal | (none) | tier2: H1 %class.MTRand |
-| fluidanimate | H1 %struct.cellpool, H1 %struct.parsec_barrier_t, H2 %union.pthread_mutex_t, H6 (pointer) i32 array | tier2: H2 %class.Vec3 |
-| streamcluster | H1 %struct.parsec_barrier_t, H2 %struct.Point, H6 (pointer) double array, H6 (pointer) i32 array, H6 (pointer) i8 array | tier2: H5 @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i; tier2: H5 @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open; tier2: H5 @_ZZ5pgainlP6PointsdPliP16parsec_b... |
+| canneal | (none) | tier2: H1 %class.MTRand _ZN6MTRand6reloadEv, _ZN6MTRand7randIntEv |
+| fluidanimate | H1 %struct.cellpool _Z16cellpool_getcellP8cellpool, _Z19cellpool_returncellP8cellpoolP4Cell, H1 %struct.parsec_barrier_t _Z19parsec_barrier_waitP16parsec_barrier_t, H2 %union.pthread_mutex_t _Z15ComputeForcesMTi, H6 (pointer) i32 array _Z13RebuildGridMTi, H6 (pointer) i32 array _Z16ClearParticles... | tier2: H2 %class.Vec3 _Z13RebuildGridMTi |
+| streamcluster | H1 %struct.parsec_barrier_t _Z19parsec_barrier_waitP16parsec_barrier_t, H2 %struct.Point _Z5pgainlP6PointsdPliP16parsec_barrier_t, H6 (pointer) double array _Z5pgainlP6PointsdPliP16parsec_barrier_t, H6 (pointer) double array _Z7pspeedyP6PointsfPliP16parsec_barrier_t, H6 (pointer) double array _Z8... | tier2: H5 ×26 |

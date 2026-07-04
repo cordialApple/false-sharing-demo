@@ -159,6 +159,8 @@ strict; 0.81/0.32 counting plausibles) — first C++ input exposed gaps:
 | 30. pid-guard | Suppress H6 when writes dominated by tid==const compare — intshuffle/selectfeasible FPs | TODO |
 | 31. Symbol names | Surface resolved base names (@work_mem) in H6 finding text | TODO |
 | 32. Stride check | Insufficient-stride detection (const stride < line size) — states the actual CACHE_LINE=32 mechanism; move block-partitioned arrays to H7 text | TODO |
+| 33. opt probe cache | tier2_analyzer re-probes opt via WSL per invocation; honor OPT_BIN env so scan.py/evaluate.py probe once | TODO |
+| 34. parallel scan | scan.py runs program×analyzer pairs sequentially; ThreadPoolExecutor over subprocess calls would cut wall time ~4x | TODO |
 
 ## Architecture (mirrors c_benchmark + agent workflow)
 

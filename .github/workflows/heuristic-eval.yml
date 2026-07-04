@@ -51,10 +51,10 @@ jobs:
       # EXIT 0 = CLEAN (FP=0 FN=0, GAPS ALLOWED). EXIT 1 = REGRESSION. EXIT 2 = COMPILE FAIL.
       - name: Run heuristic evaluation (tier-1 + tier-2)
         working-directory: false-sharing-lab/static_analysis
-        # WIPE COMMITTED SCORE FILES FIRST. EARLY EXIT MUST NOT UPLOAD STALE
-        # SCORES FROM PAST GREEN RUN AS THIS RUN ARTIFACT. REVIEW CAUGHT IT.
+        # WIPE ONLY SCORE FILES THIS JOB REGENERATE. results/ ALSO HOLD
+        # COMMITTED REPORTS (scan_parsec.md, external_validation.md) — KEEP.
         run: |
-          rm -f results/*.md
+          rm -f results/heuristic_scores_*.md
           python3 evaluate.py
 
       # STEP 5: UPLOAD SCORE REPORTS AS ARTIFACT. CHECK AFTER FAILURES.
@@ -63,7 +63,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: heuristic-score-reports
-          path: false-sharing-lab/static_analysis/results/*.md
+          path: false-sharing-lab/static_analysis/results/heuristic_scores_*.md
           if-no-files-found: warn
 
   # ──────────────────────────────────────────────────────────────────────
