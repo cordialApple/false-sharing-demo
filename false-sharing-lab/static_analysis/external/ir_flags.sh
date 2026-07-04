@@ -1,0 +1,4 @@
+# CANONICAL IR COMPILE CONTRACT. SAME BASE FLAGS AS IN-HOUSE CORPUS.
+# SOURCED BY build_huron_ir.sh AND build_parsec_ir.sh. EACH APPEND OWN EXTRAS.
+IR_BASEFLAGS="-O0 -g -pthread -S -emit-llvm"
+export IR_BASEFLAGS

@@ -1,0 +1,637 @@
+{
+  "canneal": {
+    "tier1": {
+      "findings": [],
+      "error": null
+    },
+    "tier2": {
+      "findings": [
+        {
+          "detail": "Fields [1, 2] of %class.MTRand occupy cache-line bucket 78 (offset 4992-5055B) and are both written from thread-reachable code.",
+          "elements_per_cache_line": null,
+          "fix": "Split hot fields of %class.MTRand into a separate struct, or insert padding to push fields to different cache lines.",
+          "heuristic": "H1",
+          "severity": "MEDIUM",
+          "struct": "%class.MTRand",
+          "struct_size_bytes": 5008,
+          "thread_fn": "_ZN6MTRand6reloadEv, _ZN6MTRand7randIntEv"
+        }
+      ],
+      "error": null
+    }
+  },
+  "fluidanimate": {
+    "tier1": {
+      "findings": [
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "elements_per_cache_line": 16,
+          "thread_fn": "_Z13RebuildGridMTi",
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z13RebuildGridMTi'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H2",
+          "severity": "HIGH",
+          "struct": "%union.pthread_mutex_t",
+          "struct_size_bytes": 40,
+          "elements_per_cache_line": 1,
+          "thread_fn": "_Z15ComputeForcesMTi",
+          "detail": "Variable-index array access into %union.pthread_mutex_t (size=40B < 64B). Function '_Z15ComputeForcesMTi' indexes array of %union.pthread_mutex_t by thread id -- adjacent elements (1 fit per 64B cache line) share a cache line. Concurrent writes from different threads cause line ping-pong.",
+          "fix": "Pad %union.pthread_mutex_t to 64 bytes: add 'char padding[64 - sizeof(struct)]' or annotate with '__attribute__((aligned(64)))' / 'alignas(64)'."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "elements_per_cache_line": 16,
+          "thread_fn": "_Z16ClearParticlesMTi",
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z16ClearParticlesMTi'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "elements_per_cache_line": 16,
+          "thread_fn": "_Z17InitNeighCellListiiiPi",
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z17InitNeighCellListiiiPi'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H1",
+          "severity": "MEDIUM",
+          "struct": "%struct.cellpool",
+          "struct_size_bytes": 24,
+          "elements_per_cache_line": null,
+          "thread_fn": "_Z16cellpool_getcellP8cellpool, _Z19cellpool_returncellP8cellpoolP4Cell",
+          "detail": "Fields [0, 1, 2] of %struct.cellpool occupy cache-line bucket 0 (offset 0-63B) and are both written from thread-reachable code.",
+          "fix": "Split hot fields of %struct.cellpool into a separate struct, or insert padding to push fields to different cache lines."
+        },
+        {
+          "heuristic": "H1",
+          "severity": "MEDIUM",
+          "struct": "%struct.parsec_barrier_t",
+          "struct_size_bytes": 104,
+          "elements_per_cache_line": null,
+          "thread_fn": "_Z19parsec_barrier_waitP16parsec_barrier_t",
+          "detail": "Fields [3, 4] of %struct.parsec_barrier_t occupy cache-line bucket 1 (offset 64-127B) and are both written from thread-reachable code.",
+          "fix": "Split hot fields of %struct.parsec_barrier_t into a separate struct, or insert padding to push fields to different cache lines."
+        }
+      ],
+      "error": null
+    },
+    "tier2": {
+      "findings": [
+        {
+          "detail": "Variable-index array access into %class.Vec3 (size=12B < 64B). Function '_Z13RebuildGridMTi' indexes array of %class.Vec3 by thread id -- adjacent elements (5 fit per 64B cache line) share a cache line. Concurrent writes from different threads cause line ping-pong.",
+          "elements_per_cache_line": 5,
+          "fix": "Pad %class.Vec3 to 64 bytes: add 'char padding[64 - sizeof(struct)]' or annotate with '__attribute__((aligned(64)))' / 'alignas(64)'.",
+          "heuristic": "H2",
+          "severity": "HIGH",
+          "struct": "%class.Vec3",
+          "struct_size_bytes": 12,
+          "thread_fn": "_Z13RebuildGridMTi"
+        },
+        {
+          "detail": "Variable-index array access into %union.pthread_mutex_t (size=40B < 64B). Function '_Z15ComputeForcesMTi' indexes array of %union.pthread_mutex_t by thread id -- adjacent elements (1 fit per 64B cache line) share a cache line. Concurrent writes from different threads cause line ping-pong.",
+          "elements_per_cache_line": 1,
+          "fix": "Pad %union.pthread_mutex_t to 64 bytes: add 'char padding[64 - sizeof(struct)]' or annotate with '__attribute__((aligned(64)))' / 'alignas(64)'.",
+          "heuristic": "H2",
+          "severity": "HIGH",
+          "struct": "%union.pthread_mutex_t",
+          "struct_size_bytes": 40,
+          "thread_fn": "_Z15ComputeForcesMTi"
+        },
+        {
+          "detail": "Fields [0, 1, 2] of %struct.cellpool occupy cache-line bucket 0 (offset 0-63B) and are both written from thread-reachable code.",
+          "elements_per_cache_line": null,
+          "fix": "Split hot fields of %struct.cellpool into a separate struct, or insert padding to push fields to different cache lines.",
+          "heuristic": "H1",
+          "severity": "MEDIUM",
+          "struct": "%struct.cellpool",
+          "struct_size_bytes": 24,
+          "thread_fn": "_Z16cellpool_getcellP8cellpool, _Z19cellpool_returncellP8cellpoolP4Cell"
+        },
+        {
+          "detail": "Fields [3, 4] of %struct.parsec_barrier_t occupy cache-line bucket 1 (offset 64-127B) and are both written from thread-reachable code.",
+          "elements_per_cache_line": null,
+          "fix": "Split hot fields of %struct.parsec_barrier_t into a separate struct, or insert padding to push fields to different cache lines.",
+          "heuristic": "H1",
+          "severity": "MEDIUM",
+          "struct": "%struct.parsec_barrier_t",
+          "struct_size_bytes": 104,
+          "thread_fn": "_Z19parsec_barrier_waitP16parsec_barrier_t"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z13RebuildGridMTi'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 16,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z13RebuildGridMTi"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z16ClearParticlesMTi'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 16,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z16ClearParticlesMTi"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z17InitNeighCellListiiiPi'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 16,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z17InitNeighCellListiiiPi"
+        }
+      ],
+      "error": null
+    }
+  },
+  "streamcluster": {
+    "tier1": {
+      "findings": [
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "elements_per_cache_line": 16,
+          "thread_fn": "_Z10intshufflePii",
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z10intshufflePii'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "elements_per_cache_line": 16,
+          "thread_fn": "_Z19selectfeasible_fastP6PointsPPiiiP16parsec_barrier_t",
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z19selectfeasible_fastP6PointsPPiiiP16parsec_barrier_t'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "elements_per_cache_line": 16,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t",
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z5pgainlP6PointsdPliP16parsec_barrier_t'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) double array",
+          "struct_size_bytes": 8,
+          "elements_per_cache_line": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t",
+          "detail": "Variable-index store into shared scalar array ((pointer), element double = 8B) from thread function '_Z5pgainlP6PointsdPliP16parsec_barrier_t'. 8 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 8, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i8 array",
+          "struct_size_bytes": 1,
+          "elements_per_cache_line": 64,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t",
+          "detail": "Variable-index store into shared scalar array ((pointer), element i8 = 1B) from thread function '_Z5pgainlP6PointsdPliP16parsec_barrier_t'. 64 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 64, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H2",
+          "severity": "HIGH",
+          "struct": "%struct.Point",
+          "struct_size_bytes": 32,
+          "elements_per_cache_line": 2,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t",
+          "detail": "Variable-index array access into %struct.Point (size=32B < 64B). Function '_Z5pgainlP6PointsdPliP16parsec_barrier_t' indexes array of %struct.Point by thread id -- adjacent elements (2 fit per 64B cache line) share a cache line. Concurrent writes from different threads cause line ping-pong.",
+          "fix": "Pad %struct.Point to 64 bytes: add 'char padding[64 - sizeof(struct)]' or annotate with '__attribute__((aligned(64)))' / 'alignas(64)'."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) double array",
+          "struct_size_bytes": 8,
+          "elements_per_cache_line": 8,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t",
+          "detail": "Variable-index store into shared scalar array ((pointer), element double = 8B) from thread function '_Z7pspeedyP6PointsfPliP16parsec_barrier_t'. 8 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 8, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) double array",
+          "struct_size_bytes": 8,
+          "elements_per_cache_line": 8,
+          "thread_fn": "_Z8pkmedianP6PointsllPliP16parsec_barrier_t",
+          "detail": "Variable-index store into shared scalar array ((pointer), element double = 8B) from thread function '_Z8pkmedianP6PointsllPliP16parsec_barrier_t'. 8 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 8, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i8 array",
+          "struct_size_bytes": 1,
+          "elements_per_cache_line": 64,
+          "thread_fn": "_Z8pkmedianP6PointsllPliP16parsec_barrier_t",
+          "detail": "Variable-index store into shared scalar array ((pointer), element i8 = 1B) from thread function '_Z8pkmedianP6PointsllPliP16parsec_barrier_t'. 64 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 64, use a padded per-thread struct, or allocate with aligned_alloc(64, ...)."
+        },
+        {
+          "heuristic": "H1",
+          "severity": "MEDIUM",
+          "struct": "%struct.parsec_barrier_t",
+          "struct_size_bytes": 104,
+          "elements_per_cache_line": null,
+          "thread_fn": "_Z19parsec_barrier_waitP16parsec_barrier_t",
+          "detail": "Fields [3, 4] of %struct.parsec_barrier_t occupy cache-line bucket 1 (offset 64-127B) and are both written from thread-reachable code.",
+          "fix": "Split hot fields of %struct.parsec_barrier_t into a separate struct, or insert padding to push fields to different cache lines."
+        }
+      ],
+      "error": null
+    },
+    "tier2": {
+      "findings": [
+        {
+          "detail": "Variable-index array access into %struct.Point (size=32B < 64B). Function '_Z5pgainlP6PointsdPliP16parsec_barrier_t' indexes array of %struct.Point by thread id -- adjacent elements (2 fit per 64B cache line) share a cache line. Concurrent writes from different threads cause line ping-pong.",
+          "elements_per_cache_line": 2,
+          "fix": "Pad %struct.Point to 64 bytes: add 'char padding[64 - sizeof(struct)]' or annotate with '__attribute__((aligned(64)))' / 'alignas(64)'.",
+          "heuristic": "H2",
+          "severity": "HIGH",
+          "struct": "%struct.Point",
+          "struct_size_bytes": 32,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Fields [3, 4] of %struct.parsec_barrier_t occupy cache-line bucket 1 (offset 64-127B) and are both written from thread-reachable code.",
+          "elements_per_cache_line": null,
+          "fix": "Split hot fields of %struct.parsec_barrier_t into a separate struct, or insert padding to push fields to different cache lines.",
+          "heuristic": "H1",
+          "severity": "MEDIUM",
+          "struct": "%struct.parsec_barrier_t",
+          "struct_size_bytes": 104,
+          "thread_fn": "_Z19parsec_barrier_waitP16parsec_barrier_t"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element double = 8B) from thread function '_Z8pkmedianP6PointsllPliP16parsec_barrier_t'. 8 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 8,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 8, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) double array",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element double = 8B) from thread function '_Z7pspeedyP6PointsfPliP16parsec_barrier_t'. 8 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 8,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 8, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) double array",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element double = 8B) from thread function '_Z5pgainlP6PointsdPliP16parsec_barrier_t'. 8 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 8,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 8, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) double array",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z5pgainlP6PointsdPliP16parsec_barrier_t'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 16,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z19selectfeasible_fastP6PointsPPiiiP16parsec_barrier_t'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 16,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z19selectfeasible_fastP6PointsPPiiiP16parsec_barrier_t"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element i32 = 4B) from thread function '_Z10intshufflePii'. 16 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 16,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 16, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i32 array",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z10intshufflePii"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element i8 = 1B) from thread function '_Z8pkmedianP6PointsllPliP16parsec_barrier_t'. 64 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 64,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 64, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i8 array",
+          "struct_size_bytes": 1,
+          "thread_fn": "_Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Variable-index store into shared scalar array ((pointer), element i8 = 1B) from thread function '_Z5pgainlP6PointsdPliP16parsec_barrier_t'. 64 elements share each 64B cache line; thread-id-indexed writes to adjacent elements cause line ping-pong.",
+          "elements_per_cache_line": 64,
+          "fix": "Give each thread a 64B-aligned slot: stride indices by 64, use a padded per-thread struct, or allocate with aligned_alloc(64, ...).",
+          "heuristic": "H6",
+          "severity": "MEDIUM",
+          "struct": "(pointer) i8 array",
+          "struct_size_bytes": 1,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x (size 8B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x (size 8B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x (size 8B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x (size 8B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x (size 8B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x (size 8B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE20gl_cost_of_opening_x, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close (size 4B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close (size 4B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close (size 4B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close (size 4B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close (size 4B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close (size 4B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE29gl_number_of_centers_to_close, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem (size 8B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem (size 8B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem (size 8B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem (size 8B) and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem and @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem, @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z7pspeedyP6PointsfPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem (size 8B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem (size 8B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs are each smaller than 64B and are written from different thread-reachable functions (_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ5pgainlP6PointsdPliP16parsec_barrier_tE8work_mem, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z5pgainlP6PointsdPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i (size 4B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible are each smaller than 64B and are written from different thread-reachable functions (_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i (size 4B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs are each smaller than 64B and are written from different thread-reachable functions (_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE1i, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs",
+          "struct_size_bytes": 4,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open (size 1B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible are each smaller than 64B and are written from different thread-reachable functions (_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible",
+          "struct_size_bytes": 1,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open (size 1B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs are each smaller than 64B and are written from different thread-reachable functions (_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE4open, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs",
+          "struct_size_bytes": 1,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs (size 8B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible are each smaller than 64B and are written from different thread-reachable functions (_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs (size 8B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs are each smaller than 64B and are written from different thread-reachable functions (_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE5costs, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost (size 8B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible are each smaller than 64B and are written from different thread-reachable functions (_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE11numfeasible",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        },
+        {
+          "detail": "Globals @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost (size 8B) and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs are each smaller than 64B and are written from different thread-reachable functions (_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t). If the linker places them in the same cache line, concurrent writes cause placement-dependent false sharing.",
+          "elements_per_cache_line": null,
+          "fix": "Separate @_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost and @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs onto distinct cache lines (alignas(64) on each, or group thread-private state).",
+          "heuristic": "H5",
+          "severity": "MEDIUM",
+          "struct": "@_ZZ7pspeedyP6PointsfPliP16parsec_barrier_tE9totalcost, @_ZZ8pkmedianP6PointsllPliP16parsec_barrier_tE4hizs",
+          "struct_size_bytes": 8,
+          "thread_fn": "_Z7pspeedyP6PointsfPliP16parsec_barrier_t, _Z8pkmedianP6PointsllPliP16parsec_barrier_t"
+        }
+      ],
+      "error": null
+    }
+  }
+}

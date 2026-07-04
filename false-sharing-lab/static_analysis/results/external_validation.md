@@ -183,6 +183,159 @@ Remaining extras on the suite: three plausible `lu_ncb` findings
 and one FP (`getnextline` i8 buffer, data-dependent index) — the only
 confirmed false positive left across the seven programs.
 
+## Round 5 — PARSEC validation (2026-07-04, branch parsec-validation)
+
+Second independent dataset: PARSEC 3.0 (cirosantilli mirror), programs
+streamcluster, fluidanimate, canneal, compiled per
+`external/build_parsec_ir.sh` contract and scanned by both tiers
+(`results/scan_parsec.md`). Ground truth from the published literature
+(`external/parsec_ground_truth.md`, Sheriff/PREDATOR/LASER/Huron): two
+documented positives, both in streamcluster; canneal and fluidanimate are
+"FS detected but insignificant" (near-negatives) in Sheriff. Every verdict
+below was adjudicated against the PARSEC source in WSL and the emitted IR
+(GEP-base tracing), not against finding text alone.
+
+### streamcluster (2 ground-truth positives)
+
+| Ground-truth site | Tier 1 | Tier 2 |
+|---|---|---|
+| `work_mem` (function-static `double*` in `pgain`, tid-strided `work_mem[pid*stride]`, padding macro `CACHE_LINE=32` < 64B; Sheriff/PREDATOR/LASER) | **HIT*** (H6 "(pointer) double array" in `_Z5pgain...`) | **HIT*** (same H6) |
+| `switch_membership` (global `bool*`, `switch_membership[i]=1` in `pgain`; PREDATOR +4.77%) | **HIT*** (H6 "(pointer) i8 array" in `_Z5pgain...`) | **HIT*** (same H6) |
+
+Both hits verified in the IR: every variable-index `store double` in
+`_Z5pgainlP6PointsdPliP16parsec_barrier_t` traces its GEP base to a load of
+`@_ZZ5pgainl...E8work_mem` (directly or via the `lower`/`gl_lower` derived
+pointers), and the only variable-index `store i8` (`store i8 1, ptr %293`)
+traces to `@_ZL17switch_membership` (`is_center` is load-only in `pgain`).
+
+*Qualified hits, two ways:* (1) H6 reports "(pointer) double/i8 array" with
+the function name but never surfaces the variable name, even though the base
+resolves to a named global — the user must repeat the GEP trace by hand.
+(2) The stated mechanism is generic tid-adjacent indexing; the actual
+`work_mem` bug is an insufficient padding *stride* (`CACHE_LINE=32`, i.e.
+4 doubles, half a real line), and the actual `switch_membership` mechanism is
+block-range partitioning with boundary sharing (H7 shape). Right memory, right
+function, imprecise story. The tier2 H5 pairs that literally name
+`@..._E8work_mem` do **not** count toward hit #1: they flag the 8-byte static
+*pointer slot* in the data segment, not the malloc'd buffer it points to.
+
+### canneal (ground truth: no significant FS — true-negative case)
+
+| Finding | Verdict |
+|---|---|
+| Tier 1: no findings | **Correct** (matches ground truth) |
+| Tier 2: H1 MEDIUM `%class.MTRand` fields [1, 2], bucket 78 | **FP.** Each `annealer_thread::Run` has a stack-local `Rng rng` (annealer_thread.cpp:55) whose constructor does `_rng = new MTRand(seed++)` (rng.h:47) — one MTRand per thread, never shared. Fields [1, 2] really are `pNext`/`left` at offsets 4992/5000 (MersenneTwister.h typedefs `uint32` as `unsigned long`, so `mt[624]` is 4992B) and really are co-written by `reload()`/`randInt()` — but only ever by the owning thread. |
+
+Root cause, two layers: (a) neither tier's allocation model knows C++
+`operator new` — tier1 `malloc_re` and tier2 `isAllocFnName` both match only
+`malloc|calloc|aligned_alloc|realloc`, so `_Znwm` is not a privacy-eligible
+allocation site; (b) even with `_Znwm` modeled, the pointer is stored into the
+`_rng` member field of a stack-local `Rng`, which the current escape analysis
+counts as an escape. Tier1's silence is **not** a correct negative for the
+right reason: its struct parser regex (`^(%(?:struct|union)\.[\w.]+)`) skips
+`%class.*` types entirely, so C++ class layouts are invisible to tier1 —
+a luck-based pass here and a real coverage gap everywhere else.
+
+### fluidanimate (ground truth: FS detected but insignificant — Sheriff)
+
+| Finding (tier) | Assessment |
+|---|---|
+| H2 HIGH `%union.pthread_mutex_t` array, `ComputeForcesMT` (both) | **Plausible but unconfirmed.** `mutex[index][j]` arrays of 40B mutexes, locked by different threads on neighboring border cells — classic adjacent-locks pattern; consistent with Sheriff's heavy-locking observation, no published fix. |
+| H1 `%struct.parsec_barrier_t` fields [3, 4] (both) | **Plausible but unconfirmed.** All threads write the counter/flag words in `parsec_barrier_wait`; real contention, but inherent to a sync primitive (mostly true sharing). Same finding also appears in streamcluster — same assessment. |
+| H1 `%struct.cellpool` fields [0-2] (both) | **Qualified plausible — wrong mechanism.** `pools = new cellpool[NUM_GRIDS]` (pthreads.cpp:139), one 24B pool per thread, each thread mutating only `pools[tid]` in the parallel phase. As stated (one shared instance, hot fields same line) it is wrong — each instance is single-writer. But 24B elements mean 2-3 per-thread pool headers share each line, so cross-*instance* FS is real; the correct shape is tid-indexed array of small structs (H2/H7), not H1. |
+| H6 i32 `RebuildGridMT` (both) | **Plausible.** Verified: `++cnumPars[index]` where border-cell indices are genuinely written by multiple threads (mutex-guarded at pthreads.cpp:603-615); the lock serializes but does not stop line ping-pong. Matches Sheriff's detected-but-insignificant. |
+| H6 i32 `ClearParticlesMT` (both) | **Plausible-weak.** `cnumPars[index] = 0` over the thread's own grid slab; arrays are cacheline-aligned at the start, but slab boundaries fall mid-line. Boundary-only, minor. |
+| H6 i32 `InitNeighCellList` (both) | **FP.** Writes `neighCells[n]` where every caller passes a stack array `int neighCells[3*3*3]` (pthreads.cpp:698, 791) — thread-private memory. Root cause: the round-4 interprocedural privacy handles malloc results and private arguments but **not allocas** — neither tier1 (`private = malloc_regs | private_params`) nor tier2 (`isPrivateBase` handles `CallBase`/`Argument` only) seeds a non-escaping `alloca` as a private base. |
+| H2 HIGH `%class.Vec3`, `RebuildGridMT` (tier2 only) | **Plausible-weak.** `cell->p[np % PARTICLES_PER_CELL] = ...` — variable index into a Vec3 array inside a `Cell`; border cells are written by multiple threads, but the index is a particle count, not a tid, so H2's stated mechanism is wrong. Tier1 missed it for the same `%class.*` parsing gap as MTRand. |
+
+### streamcluster extra findings
+
+| Finding (tier) | Assessment |
+|---|---|
+| H6 i32 `intshuffle` (both) | **FP.** Only ever called under `if (pid == 0)` (pFL, streamcluster.cpp:~1226) — single-thread phase. Runtime pid-guards are invisible to both tiers. |
+| H6 i32 `selectfeasible_fast` (both) | **FP.** Source comment states "it is called only by thread 0 for now"; all `(*feasible)[i]` writes are single-thread. Same pid-guard blindness. |
+| H6 i32 `pgain` (both) | **Plausible.** Verified as `center_table[i]` (GEP base `@_ZL12center_table`), block-partitioned per tid — same boundary-sharing shape as `switch_membership`, just not in the papers. |
+| H2 HIGH `%struct.Point` in `pgain` (both) | **Plausible.** Threads write `points->p[i].cost/.assign` over disjoint tid blocks; 32B Points, 2 per line — block-boundary sharing (H7 shape), not documented. |
+| H6 double `pspeedy` / H6 double `pkmedian` (both) | **Plausible.** `costs[pid]` (malloc'd `double*nproc`, pspeedy) and `hizs[pid] = myhiz` (calloc'd `double*nproc`, streamcluster.cpp:1511) — textbook unpadded tid-indexed reduction arrays; real FS shape, written once per phase, so perf-insignificant. |
+| H6 i8 `pkmedian` (both) | **Plausible.** `is_center[...] = true` — ground-truth doc itself notes `is_center` has the same shape as `switch_membership` but is not in the papers. |
+| H5 ×26 pairwise on function-statics (tier2 only) | **Unverifiable as pairs; flood.** See below. |
+
+### The H5 pair flood
+
+Tier2 emitted **26** pairwise H5 findings over 9 function-static globals
+(`pgain`: `work_mem`, `gl_cost_of_opening_x`, `gl_number_of_centers_to_close`;
+`pspeedy`: `i`, `open`, `costs`, `totalcost`; `pkmedian`: `numfeasible`,
+`hizs`) — every cross-function pair of small thread-written statics. The
+underlying signal is legitimate: these statics live in `.bss`, several are
+genuinely written by all threads in the documented hot region, and small-
+global adjacency is exactly PREDATOR territory. But the analyzer cannot know
+final link layout, so each *pair* is speculative, and O(n²) enumeration turns
+one observation ("9 small thread-written globals may co-reside on a few
+lines") into 26 MEDIUM rows that bury the two real hits in the same table.
+Fix: cluster instead of pair — group candidate globals by estimated line
+occupancy (module emission order + size + alignment) and emit **one finding
+per cluster** listing its members, with pair detail demoted to the JSON.
+That alone shrinks this report from 30 tier2 streamcluster rows to ~6.
+
+### Scores
+
+Recall vs ground truth (2 documented positives, both streamcluster):
+**tier1 2/2, tier2 2/2** — both qualified hits (right memory and function,
+variable name not surfaced, mechanism generically stated).
+
+Precision, distinct findings: tier1 16 findings — 2 TP, 3 confirmed FP
+(`intshuffle`, `selectfeasible_fast`, `InitNeighCellList`), 11 plausible-but-
+unconfirmed → strict 2/16 (**0.13**), generous (plausibles as TP) 13/16
+(**0.81**). Tier2 44 findings — 2 TP, 4 confirmed FP (the three above +
+MTRand), 12 plausible, 26 unverifiable H5 pairs → strict 2/44 (**0.05**),
+generous 14/44 (**0.32**). Tier2's strict precision is dominated by the H5
+flood; with H5 clustered to one finding per group, tier2 would be 2 TP /
+4 FP / 13 other ≈ tier1's profile.
+
+On the near-negative programs: tier1 canneal = 0 findings (correct); both
+tiers' fluidanimate findings are consistent with Sheriff's
+"detected-but-insignificant" verdict except the one `InitNeighCellList` FP.
+
+### Failure modes (labeled)
+
+1. **H5 pair explosion (26/44 tier2 findings):** all-pairs enumeration over
+   co-resident small globals; needs per-line clustering (fix sketched above).
+2. **pid-guard blindness (2 FPs):** `if (pid == 0) { ... }` single-thread
+   phases inside thread-reachable functions look multi-threaded. A cheap
+   heuristic — writes dominated by a comparison of a thread-id-like value
+   against a constant — could downgrade these.
+3. **Alloca privacy gap (1 FP):** stack arrays passed to helpers
+   (`neighCells`) are not seeded as private bases in either tier's
+   interprocedural privacy. Straightforward extension of the round-4 work.
+4. **`operator new` not an allocation site (1 FP):** `_Znwm`/`_Znam` missing
+   from both tiers' alloc-function lists, so C++ heap objects can never be
+   proven thread-private (MTRand). Also needs field-store-tolerant escape
+   handling for the `this->_rng = new ...` idiom.
+5. **`%class.*` invisible to tier1:** the struct-decl regex parses only
+   `%struct.`/`%union.`. Tier1 missed `%class.Vec3` and would miss any C++
+   class-typed positive; the canneal "clean pass" was luck, not judgment.
+6. **Findings don't name the variable:** H6 resolves GEP bases to named
+   globals internally but reports only "(pointer) double array" + function.
+   Surfacing the resolved symbol (`work_mem`, `switch_membership`) would have
+   made both ground-truth hits self-evident without manual IR tracing.
+7. **Mechanism precision:** the `work_mem` bug is specifically an
+   insufficient compile-time padding stride (`CACHE_LINE=32` vs 64B lines) —
+   a detectable pattern (stride arithmetic from a constant < line size) that
+   H6's generic message does not capture; `switch_membership`/`center_table`/
+   `Point` are block-boundary (H7) shapes reported under H6/H2 stories.
+
+### Takeaways
+
+- The two canonical streamcluster bugs — including the `CACHE_LINE 32` bug
+  still shipping in PARSEC 3.0 — are caught by both tiers with zero harness
+  errors on foreign C++ IR. That is the headline positive.
+- The near-negatives behave as ground truth predicts: nothing significant in
+  canneal (tier1), locking-era noise in fluidanimate.
+- The five confirmed FPs have three small, mechanical root causes (allocas,
+  `_Znwm`, pid-guards); none require new infrastructure.
+- Presentation, not detection, is now the bigger gap: H5 flooding and
+  unnamed H6 arrays make a correct scan read worse than it is.
+
 ## Reproduce
 
 ```sh
@@ -191,4 +344,13 @@ sh false-sharing-lab/static_analysis/external/build_huron_ir.sh
 # then, from false-sharing-lab/static_analysis/
 python ir_analyzer.py external/huron_ir/<prog>.ll --json
 python tier2_analyzer.py external/huron_ir/<prog>.ll --json
+```
+
+PARSEC round:
+
+```sh
+# in WSL, from repo root
+sh false-sharing-lab/static_analysis/external/build_parsec_ir.sh
+# then, from false-sharing-lab/static_analysis/
+python scan.py external/parsec_ir --out results/scan_parsec.md --json
 ```

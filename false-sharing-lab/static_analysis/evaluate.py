@@ -41,6 +41,10 @@ RESULTS_DIR  = THIS_DIR / 'results'
 CACHE_LINE = 64
 
 
+def rel_name(rel):
+    return rel.with_suffix('').as_posix()
+
+
 def win_to_wsl(path):
     # CONVERT WINDOWS PATH TO WSL /mnt/ PATH.
     # C:\foo\bar -> /mnt/c/foo/bar. ONLY CALLED ON WINDOWS HOST.
@@ -98,7 +102,7 @@ def run_analyzer(analyzer_cmd_template, ll_file):
         return None, f"analyzer exit {result.returncode}: {result.stderr.strip()}"
     try:
         data = json.loads(result.stdout)
-        return data.get('findings', []), None
+        return data.get('findings') or [], None
     except json.JSONDecodeError as e:
         return None, f"JSON parse error: {e}"
 
@@ -342,7 +346,7 @@ def main():
             ll_file  = get_ll_path(case)
             # FULL RELATIVE PATH MINUS .c AS CASE NAME. STEM ALONE COLLIDE IF
             # basic/ AND advanced/ EVER SHARE A FILENAME. REVIEW CAUGHT THIS.
-            case_name = str(rel.with_suffix('')).replace('\\', '/')
+            case_name = rel_name(rel)
 
             # RUN ANALYZER.
             findings, err = run_analyzer(cmd_template, ll_file)

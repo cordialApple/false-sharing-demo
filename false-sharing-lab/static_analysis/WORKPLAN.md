@@ -136,6 +136,32 @@ Gemini roadmap phase 5, first slice (module-local, no LTO):
 Huron: LocalCopies FP gone both tiers (last confirmed FP from round 1);
 all 7 hits intact. Remaining suite extras: 4 plausible + 1 FP (getnextline).
 
+## Round 7 — PARSEC validation, first C++ dataset (2026-07-04)
+
+Branch `parsec-validation` (stacked on interproc-privacy). New tooling:
+`scan.py` (label-free findings report + cross-tier agreement),
+`external/build_parsec_ir.sh` (streamcluster/fluidanimate/canneal ->
+merged .ll via sparse clone + llvm-link-18),
+`external/parsec_ground_truth.md` (Sheriff/PREDATOR/LASER/Huron table).
+
+Results (external_validation.md round 5): both documented streamcluster
+bugs HIT both tiers (work_mem CACHE_LINE=32 stride, switch_membership
+bool array) — qualified: right object, generic mechanism text. Recall
+2/2. Strict precision weak on foreign C++ (tier1 0.13, tier2 0.05
+strict; 0.81/0.32 counting plausibles) — first C++ input exposed gaps:
+
+| Phase | Task | Status |
+|---|---|---|
+| 26. H5 clustering | 26 pairwise H5 findings for 9 statics -> one finding per estimated cache-line cluster, pairs to JSON only | TODO |
+| 27. Alloca privacy | Stack allocas as private bases in interproc privacy (both tiers) — InitNeighCellList FP | TODO |
+| 28. C++ alloc fns | _Znwm/_Znam in alloc lists + field-store-tolerant escape (this->member = new ...) — MTRand FP | TODO |
+| 29. Tier1 %class | Parse %class.* layouts (regex ir_analyzer.py:104) — Vec3 miss, latent C++ recall hole | TODO |
+| 30. pid-guard | Suppress H6 when writes dominated by tid==const compare — intshuffle/selectfeasible FPs | TODO |
+| 31. Symbol names | Surface resolved base names (@work_mem) in H6 finding text | TODO |
+| 32. Stride check | Insufficient-stride detection (const stride < line size) — states the actual CACHE_LINE=32 mechanism; move block-partitioned arrays to H7 text | TODO |
+| 33. opt probe cache | tier2_analyzer re-probes opt via WSL per invocation; honor OPT_BIN env so scan.py/evaluate.py probe once | TODO |
+| 34. parallel scan | scan.py runs program×analyzer pairs sequentially; ThreadPoolExecutor over subprocess calls would cut wall time ~4x | TODO |
+
 ## Architecture (mirrors c_benchmark + agent workflow)
 
 ```
